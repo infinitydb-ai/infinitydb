@@ -530,3 +530,5 @@ class InfinityDB:
             "backend": "SQLite-WAL",
             "p95_recall_target_ms": "<5.0",
         }
+
+# L0 WAL optimization
