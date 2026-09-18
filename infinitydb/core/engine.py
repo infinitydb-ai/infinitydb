@@ -532,3 +532,5 @@ class InfinityDB:
         }
 
 # L0 WAL optimization
+
+# L1 deterministic parser <10ms
