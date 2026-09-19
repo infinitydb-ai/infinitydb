@@ -536,3 +536,5 @@ class InfinityDB:
 # L1 deterministic parser <10ms
 
 # L1 importance 0.0-1.0
+
+# L2 causal links
