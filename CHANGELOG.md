@@ -9,3 +9,4 @@
 - feat(core): add L3 conflict auto-resolution by timestamp (2026-09-20)
 - feat(core): implement L4 policy engine for enterprise guardrails (2026-09-21)
 - feat(core): add L5 Ebbinghaus forgetting curve with decay (2026-09-21)
+- feat(core): implement L6 cryptographic proof chain SHA-256 (2026-09-21)
