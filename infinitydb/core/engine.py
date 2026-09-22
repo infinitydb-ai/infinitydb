@@ -540,3 +540,5 @@ class InfinityDB:
 # L2 causal links
 
 # hybrid scorer v1
+
+# index on fact, ts

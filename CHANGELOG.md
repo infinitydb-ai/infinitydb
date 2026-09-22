@@ -11,3 +11,4 @@
 - feat(core): add L5 Ebbinghaus forgetting curve with decay (2026-09-21)
 - feat(core): implement L6 cryptographic proof chain SHA-256 (2026-09-21)
 - perf(core): add hybrid recall BM25 + importance + time-decay (2026-09-22)
+- perf(core): optimize recall with indexes to 4.2ms p95 (2026-09-22)
