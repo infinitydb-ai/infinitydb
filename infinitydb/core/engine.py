@@ -542,3 +542,5 @@ class InfinityDB:
 # hybrid scorer v1
 
 # index on fact, ts
+
+# concurrency fix

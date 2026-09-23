@@ -12,3 +12,4 @@
 - feat(core): implement L6 cryptographic proof chain SHA-256 (2026-09-21)
 - perf(core): add hybrid recall BM25 + importance + time-decay (2026-09-22)
 - perf(core): optimize recall with indexes to 4.2ms p95 (2026-09-22)
+- fix(core): handle concurrent writes with WAL and retry (2026-09-23)
