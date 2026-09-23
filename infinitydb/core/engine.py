@@ -544,3 +544,5 @@ class InfinityDB:
 # index on fact, ts
 
 # concurrency fix
+
+# GDPR delete
