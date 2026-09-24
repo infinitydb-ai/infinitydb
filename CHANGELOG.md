@@ -16,3 +16,4 @@
 - feat(core): add delete_user for GDPR right-to-be-forgotten (2026-09-23)
 - feat(core): add get_proof and verify atom provenance (2026-09-24)
 - feat(sdk): initialize Node.js SDK with better-sqlite3 (2026-09-24)
+- feat(sdk): add Python SDK sync wrapper and error handling (2026-09-24)
