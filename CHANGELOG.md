@@ -14,3 +14,4 @@
 - perf(core): optimize recall with indexes to 4.2ms p95 (2026-09-22)
 - fix(core): handle concurrent writes with WAL and retry (2026-09-23)
 - feat(core): add delete_user for GDPR right-to-be-forgotten (2026-09-23)
+- feat(core): add get_proof and verify atom provenance (2026-09-24)
