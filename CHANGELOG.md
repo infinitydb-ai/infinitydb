@@ -17,3 +17,4 @@
 - feat(core): add get_proof and verify atom provenance (2026-09-24)
 - feat(sdk): initialize Node.js SDK with better-sqlite3 (2026-09-24)
 - feat(sdk): add Python SDK sync wrapper and error handling (2026-09-24)
+- feat(sdk): add Postgres adapter stub for pgvector scale (2026-09-25)
