@@ -50,3 +50,5 @@ assert.strictEqual(wipe.gdprCompliant, true);
 assert.strictEqual(db.recall("Rust", { userId: "usr_sarah" }).results.length, 0);
 
 console.log("[PASS] All JavaScript tests passed successfully!");
+
+// sdk tests
