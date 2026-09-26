@@ -19,3 +19,4 @@
 - feat(sdk): add Python SDK sync wrapper and error handling (2026-09-24)
 - feat(sdk): add Postgres adapter stub for pgvector scale (2026-09-25)
 - feat(sdk): add TypeScript types for recall results (2026-09-25)
+- chore(sdk): configure tsconfig and npm build pipeline (2026-09-26)
