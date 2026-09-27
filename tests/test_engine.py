@@ -151,3 +151,6 @@ def test_gdpr_delete_user():
     # Eve's memories must remain intact
     eve_res = db.recall("budget", user_id="user_eve")
     assert len(eve_res["results"]) > 0
+
+def test_add_smoke():
+    pass

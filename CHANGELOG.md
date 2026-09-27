@@ -21,3 +21,4 @@
 - feat(sdk): add TypeScript types for recall results (2026-09-25)
 - chore(sdk): configure tsconfig and npm build pipeline (2026-09-26)
 - test(sdk): add Node SDK unit tests for add/recall (2026-09-26)
+- test(sdk): add Python SDK unit tests for L0-L6 (2026-09-27)
