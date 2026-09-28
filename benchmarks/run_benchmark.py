@@ -462,3 +462,5 @@ def run_benchmarks() -> dict[str, Any]:
 
 if __name__ == "__main__":
     run_benchmarks()
+
+# bench harness
