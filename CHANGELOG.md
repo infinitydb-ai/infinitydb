@@ -24,3 +24,4 @@
 - test(sdk): add Python SDK unit tests for L0-L6 (2026-09-27)
 - fix(sdk): normalize user_id handling across Python and Node (2026-09-27)
 - docs(sdk): add Python and Node.js quick start examples (2026-09-27)
+- docs(sdk): add API reference for add/recall/get_proof (2026-09-28)
