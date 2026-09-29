@@ -26,3 +26,4 @@
 - docs(sdk): add Python and Node.js quick start examples (2026-09-27)
 - docs(sdk): add API reference for add/recall/get_proof (2026-09-28)
 - feat(bench): add benchmark harness for PersonaMem (2026-09-28)
+- feat(bench): add LongMemEval dataset loader (2026-09-29)
