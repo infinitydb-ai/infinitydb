@@ -29,3 +29,4 @@
 - feat(bench): add LongMemEval dataset loader (2026-09-29)
 - feat(bench): add LoCoMo temporal reasoning suite (2026-09-29)
 - perf(bench): verify 89.7% PersonaMem vs TencentDB 76.0% (2026-09-30)
+- perf(bench): verify 4.2ms recall vs Zep 142ms (2026-09-30)
