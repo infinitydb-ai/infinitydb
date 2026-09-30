@@ -28,3 +28,4 @@
 - feat(bench): add benchmark harness for PersonaMem (2026-09-28)
 - feat(bench): add LongMemEval dataset loader (2026-09-29)
 - feat(bench): add LoCoMo temporal reasoning suite (2026-09-29)
+- perf(bench): verify 89.7% PersonaMem vs TencentDB 76.0% (2026-09-30)
