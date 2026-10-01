@@ -31,3 +31,4 @@
 - perf(bench): verify 89.7% PersonaMem vs TencentDB 76.0% (2026-09-30)
 - perf(bench): verify 4.2ms recall vs Zep 142ms (2026-09-30)
 - perf(bench): verify 81.4% token saving vs Mem0 42.1% (2026-09-30)
+- feat(bench): add 2000-run stress test for stability (2026-10-01)
