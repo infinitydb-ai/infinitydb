@@ -34,3 +34,4 @@
 - feat(bench): add 2000-run stress test for stability (2026-10-01)
 - test(bench): validate 2000 runs 10,020 facts 0 errors (2026-10-01)
 - perf(bench): measure throughput 776-2007 items/s (2026-10-02)
+- docs(bench): add reproducibility guide with hardware spec (2026-10-02)

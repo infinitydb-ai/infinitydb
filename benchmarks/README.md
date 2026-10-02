@@ -45,3 +45,5 @@ The script will:
 <!-- validated 2000 runs 10,020 facts 0 errors -->
 
 <!-- measured throughput 776-2007 items/s -->
+
+<!-- reproducibility guide spec -->
