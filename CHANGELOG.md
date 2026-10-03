@@ -36,3 +36,4 @@
 - perf(bench): measure throughput 776-2007 items/s (2026-10-02)
 - docs(bench): add reproducibility guide with hardware spec (2026-10-02)
 - fix(bench): ensure deterministic benchmark seeding (2026-10-03)
+- chore(bench): add benchmark CI workflow (2026-10-03)

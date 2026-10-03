@@ -1,0 +1,7 @@
+name: Benchmark CI
+on: [workflow_dispatch]
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
