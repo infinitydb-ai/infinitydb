@@ -37,3 +37,4 @@
 - docs(bench): add reproducibility guide with hardware spec (2026-10-02)
 - fix(bench): ensure deterministic benchmark seeding (2026-10-03)
 - chore(bench): add benchmark CI workflow (2026-10-03)
+- feat(dashboard): create Next.js local dashboard scaffold (2026-10-03)
