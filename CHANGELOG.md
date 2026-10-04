@@ -39,3 +39,4 @@
 - chore(bench): add benchmark CI workflow (2026-10-03)
 - feat(dashboard): create Next.js local dashboard scaffold (2026-10-03)
 - feat(dashboard): add real-time query tester with latency (2026-10-04)
+- feat(dashboard): add L0 raw logs viewer (2026-10-04)
