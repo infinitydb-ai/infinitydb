@@ -38,3 +38,4 @@
 - fix(bench): ensure deterministic benchmark seeding (2026-10-03)
 - chore(bench): add benchmark CI workflow (2026-10-03)
 - feat(dashboard): create Next.js local dashboard scaffold (2026-10-03)
+- feat(dashboard): add real-time query tester with latency (2026-10-04)
