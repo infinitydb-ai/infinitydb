@@ -43,3 +43,4 @@
 - feat(dashboard): add L1 atomic facts table (2026-10-05)
 - feat(dashboard): add L2 causal graph with Mermaid (2026-10-05)
 - feat(dashboard): add L3 persona inspector (2026-10-06)
+- feat(dashboard): add L4 policy manager (2026-10-06)
