@@ -42,3 +42,4 @@
 - feat(dashboard): add L0 raw logs viewer (2026-10-04)
 - feat(dashboard): add L1 atomic facts table (2026-10-05)
 - feat(dashboard): add L2 causal graph with Mermaid (2026-10-05)
+- feat(dashboard): add L3 persona inspector (2026-10-06)
