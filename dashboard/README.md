@@ -20,3 +20,5 @@ Open `http://localhost:8080` in your web browser.
 - **Dynamic Persona (L3)**: Conflict auto-resolution view tracking user preferences over time.
 - **Enterprise Policies (L4)**: System-wide guardrails and compliance rules.
 - **Cryptographic Proof Chain (L6)**: Verifiable SHA-256 provenance linking atoms back to raw logs.
+
+<!-- dashboard package configured -->
