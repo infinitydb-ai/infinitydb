@@ -47,3 +47,4 @@
 - feat(dashboard): add L6 proof chain audit tool (2026-10-06)
 - fix(dashboard): optimize dashboard recall API route (2026-10-07)
 - chore(dashboard): configure dashboard package.json (2026-10-07)
+- docs: add World Leaderboard to README with 4.2ms result (2026-10-08)

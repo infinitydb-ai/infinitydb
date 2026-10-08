@@ -215,3 +215,5 @@ If you use InfinityDB in research, please cite: `https://github.com/infinitydb-a
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+<!-- leaderboard update -->
