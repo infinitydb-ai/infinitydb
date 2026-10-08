@@ -48,3 +48,4 @@
 - fix(dashboard): optimize dashboard recall API route (2026-10-07)
 - chore(dashboard): configure dashboard package.json (2026-10-07)
 - docs: add World Leaderboard to README with 4.2ms result (2026-10-08)
+- docs: add InfinityDB vs World comparison matrix (2026-10-08)
