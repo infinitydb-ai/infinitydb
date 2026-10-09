@@ -219,3 +219,5 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 <!-- leaderboard update -->
 
 <!-- comparison matrix update -->
+
+<!-- architecture pyramid update -->
