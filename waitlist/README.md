@@ -18,3 +18,5 @@ To get early access and receive **6 months of Free Pro Cloud** at launch:
 
 1. Star the repository: [https://github.com/infinitydb-ai/infinitydb](https://github.com/infinitydb-ai/infinitydb)
 2. Submit your email and company name to our waitlist form or open an issue with tag `[waitlist]`: [https://github.com/infinitydb-ai/infinitydb/issues](https://github.com/infinitydb-ai/infinitydb/issues)
+
+<!-- waitlist update -->

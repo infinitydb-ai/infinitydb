@@ -52,3 +52,4 @@
 - docs: add L0-L6 architecture pyramid diagram (2026-10-09)
 - feat(assets): add professional logo.svg with infinity mark (2026-10-09)
 - feat(assets): add architecture diagram 700px (2026-10-09)
+- docs: add waitlist README for cloud (2026-10-10)
