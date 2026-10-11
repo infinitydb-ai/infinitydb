@@ -55,3 +55,4 @@
 - docs: add waitlist README for cloud (2026-10-10)
 - chore: add Apache 2.0 LICENSE (2026-10-10)
 - chore: add FUNDING.yml for GitHub Sponsors (2026-10-11)
+- chore: add gitignore for db and node_modules (2026-10-11)
