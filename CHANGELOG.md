@@ -57,3 +57,4 @@
 - chore: add FUNDING.yml for GitHub Sponsors (2026-10-11)
 - chore: add gitignore for db and node_modules (2026-10-11)
 - ci: add publish-pypi workflow with trusted publishing (2026-10-12)
+- ci: add publish-npm workflow with provenance (2026-10-12)
