@@ -26,3 +26,4 @@ jobs:
         with:
           node-version: "20"
       - run: node infinitydb-js/test.js
+
