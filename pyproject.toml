@@ -27,3 +27,4 @@ packages = ["infinitydb"]
 testpaths = ["tests"]
 addopts = "-p no:playwright -p no:langsmith"
 
+

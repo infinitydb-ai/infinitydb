@@ -60,3 +60,4 @@
 - ci: add publish-npm workflow with provenance (2026-10-12)
 - ci: add tests.yml for pytest and node tests (2026-10-12)
 - chore: bump version to 1.0.0 for release (2026-10-13)
+- chore: set canonical URLs to infinitydb-ai/infinitydb (2026-10-13)
