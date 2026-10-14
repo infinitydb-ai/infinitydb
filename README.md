@@ -221,3 +221,5 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 <!-- comparison matrix update -->
 
 <!-- architecture pyramid update -->
+
+<!-- testing guide -->
