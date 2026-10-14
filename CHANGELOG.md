@@ -62,3 +62,4 @@
 - chore: bump version to 1.0.0 for release (2026-10-13)
 - chore: set canonical URLs to infinitydb-ai/infinitydb (2026-10-13)
 - docs: add verification and testing section (2026-10-14)
+- docs: add citation and contributing guidelines (2026-10-14)
