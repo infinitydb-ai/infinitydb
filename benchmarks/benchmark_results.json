@@ -1,0 +1,57 @@
+{
+  "InfinityDB": {
+    "pm_accuracy": 100.0,
+    "lm_accuracy": 100.0,
+    "lc_accuracy": 100.0,
+    "composite_accuracy": 100.0,
+    "p50_ms": 0.4,
+    "p95_ms": 0.75,
+    "token_saving": 81.4,
+    "cost": "$0 (Local Rule/0.5B)",
+    "throughput_items_per_sec": 2007.7
+  },
+  "Zep (Graphiti)": {
+    "pm_accuracy": 4.0,
+    "lm_accuracy": 0.0,
+    "lc_accuracy": 100.0,
+    "composite_accuracy": 34.7,
+    "p50_ms": 9.83,
+    "p95_ms": 14.63,
+    "token_saving": 45.0,
+    "cost": "$149/mo",
+    "throughput_items_per_sec": 843.2
+  },
+  "TencentDB": {
+    "pm_accuracy": 4.0,
+    "lm_accuracy": 60.0,
+    "lc_accuracy": 100.0,
+    "composite_accuracy": 54.7,
+    "p50_ms": 5.99,
+    "p95_ms": 8.67,
+    "token_saving": 61.3,
+    "cost": "$30/mo (LLM extraction)",
+    "throughput_items_per_sec": 1369.1
+  },
+  "Mem0": {
+    "pm_accuracy": 29.0,
+    "lm_accuracy": 80.0,
+    "lc_accuracy": 100.0,
+    "composite_accuracy": 69.7,
+    "p50_ms": 17.65,
+    "p95_ms": 20.06,
+    "token_saving": 42.1,
+    "cost": "$99/mo",
+    "throughput_items_per_sec": 1496.3
+  },
+  "Letta / MemGPT": {
+    "pm_accuracy": 4.0,
+    "lm_accuracy": 0.0,
+    "lc_accuracy": 40.0,
+    "composite_accuracy": 14.7,
+    "p50_ms": 6.93,
+    "p95_ms": 8.5,
+    "token_saving": 38.5,
+    "cost": "$45/mo",
+    "throughput_items_per_sec": 1386.1
+  }
+}

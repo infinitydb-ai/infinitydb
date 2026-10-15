@@ -1,7 +1,28 @@
 {
-  "name": "@infinitydb-ai/infinitydb",
+  "name": "infinitydb",
   "version": "1.0.0",
-  "description": "JavaScript client for InfinityDB",
+  "description": "InfinityDB - High-performance agent memory engine. Remember Everything. Forget Nothing That Matters.",
   "main": "index.js",
-  "license": "MIT"
+  "types": "index.d.ts",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/infinitydb-ai/infinitydb.git"
+  },
+  "homepage": "https://github.com/infinitydb-ai/infinitydb#readme",
+  "bugs": {
+    "url": "https://github.com/infinitydb-ai/infinitydb/issues"
+  },
+  "keywords": [
+    "agent-memory",
+    "ai-agents",
+    "llm-memory",
+    "vector-database",
+    "rag",
+    "sqlite",
+    "long-term-memory"
+  ],
+  "scripts": {
+    "test": "node test.js"
+  }
 }

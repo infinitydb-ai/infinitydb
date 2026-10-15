@@ -5,12 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "infinitydb"
 version = "1.0.0"
-description = "An open-source agent memory engine"
+description = "InfinityDB - High-performance open-source agent memory engine"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
-authors = [{name = "InfinityDB contributors"}]
+license = "Apache-2.0"
+authors = [{name = "InfinityDB AI", email = "team@infinitydb.ai"}]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/infinitydb-ai/infinitydb"
+Repository = "https://github.com/infinitydb-ai/infinitydb"
+Issues = "https://github.com/infinitydb-ai/infinitydb/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
@@ -20,3 +25,4 @@ packages = ["infinitydb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-p no:playwright -p no:langsmith"
