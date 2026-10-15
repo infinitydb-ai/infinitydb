@@ -63,3 +63,4 @@
 - chore: set canonical URLs to infinitydb-ai/infinitydb (2026-10-13)
 - docs: add verification and testing section (2026-10-14)
 - docs: add citation and contributing guidelines (2026-10-14)
+- docs: finalize professional README for World #1 launch (2026-10-15)
