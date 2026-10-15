@@ -1,0 +1,7 @@
+{
+  "name": "@infinitydb-ai/infinitydb",
+  "version": "1.0.0",
+  "description": "JavaScript client for InfinityDB",
+  "main": "index.js",
+  "license": "MIT"
+}

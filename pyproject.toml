@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "infinitydb"
+version = "1.0.0"
+description = "An open-source agent memory engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{name = "InfinityDB contributors"}]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["infinitydb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
