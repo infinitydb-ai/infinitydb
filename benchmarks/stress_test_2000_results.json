@@ -1,0 +1,28 @@
+{
+  "iterations": 2000,
+  "success_rate": 100.0,
+  "total_recall_time_sec": 11.8805,
+  "recall_qps": 168.3,
+  "ingest_qps": 776.8,
+  "latency_distribution_ms": {
+    "min": 2.582,
+    "p50": 5.44,
+    "p90": 7.281,
+    "p95": 8.238,
+    "p99": 12.147,
+    "max": 22.046,
+    "mean": 5.806,
+    "stdev": 1.514
+  },
+  "stats": {
+    "l0_raw_logs": 2020,
+    "l1_atom_facts": 10020,
+    "l2_causal_episodes": 2000,
+    "l3_personas": 500,
+    "l4_policies": 2,
+    "l6_cryptographic_proofs": 10020,
+    "backend": "SQLite-WAL",
+    "p95_recall_target_ms": "<5.0"
+  },
+  "proofs_verified": 2000
+}
