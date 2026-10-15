@@ -64,3 +64,7 @@
 - docs: add verification and testing section (2026-10-14)
 - docs: add citation and contributing guidelines (2026-10-14)
 - docs: finalize professional README for World #1 launch (2026-10-15)
+# InfinityDB Changelog
+
+All notable changes documented here.
+- chore: update CHANGELOG for v1.0.0 (2026-10-15)
