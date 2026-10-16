@@ -47,6 +47,7 @@ class InfinityDB:
         self._is_memory = db_path == ":memory:"
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._seq = 0
 
         if not self._is_memory:
             self.conn.execute("PRAGMA journal_mode = WAL;")
@@ -182,7 +183,8 @@ class InfinityDB:
         cryptographic proof records.
         """
         now = time.time()
-        log_id = f"L0_{self._sha256(conversation + str(now))[:16]}"
+        self._seq += 1
+        log_id = f"L0_{self._sha256(conversation + str(now) + str(self._seq))[:16]}"
 
         # L0: Persist raw log
         self.conn.execute(

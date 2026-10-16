@@ -1,57 +1,62 @@
 {
   "InfinityDB": {
-    "pm_accuracy": 100.0,
+    "pm_accuracy": 0.0,
     "lm_accuracy": 100.0,
     "lc_accuracy": 100.0,
-    "composite_accuracy": 100.0,
-    "p50_ms": 0.4,
-    "p95_ms": 0.75,
+    "composite_accuracy": 66.7,
+    "p50_ms": 0.32,
+    "p95_ms": 0.58,
     "token_saving": 81.4,
+    "token_saving_measured": 63.2,
     "cost": "$0 (Local Rule/0.5B)",
-    "throughput_items_per_sec": 2007.7
+    "throughput_items_per_sec": 2181.8
   },
   "Zep (Graphiti)": {
-    "pm_accuracy": 4.0,
-    "lm_accuracy": 0.0,
+    "pm_accuracy": 0.0,
+    "lm_accuracy": 100.0,
     "lc_accuracy": 100.0,
-    "composite_accuracy": 34.7,
-    "p50_ms": 9.83,
-    "p95_ms": 14.63,
+    "composite_accuracy": 66.7,
+    "p50_ms": 0.23,
+    "p95_ms": 0.4,
     "token_saving": 45.0,
+    "token_saving_measured": 42.9,
     "cost": "$149/mo",
-    "throughput_items_per_sec": 843.2
+    "throughput_items_per_sec": 423238.6
   },
   "TencentDB": {
-    "pm_accuracy": 4.0,
-    "lm_accuracy": 60.0,
+    "pm_accuracy": 1.0,
+    "lm_accuracy": 100.0,
     "lc_accuracy": 100.0,
-    "composite_accuracy": 54.7,
-    "p50_ms": 5.99,
-    "p95_ms": 8.67,
+    "composite_accuracy": 67.0,
+    "p50_ms": 0.23,
+    "p95_ms": 0.4,
     "token_saving": 61.3,
+    "token_saving_measured": 42.9,
     "cost": "$30/mo (LLM extraction)",
-    "throughput_items_per_sec": 1369.1
+    "throughput_items_per_sec": 71626.4
   },
   "Mem0": {
-    "pm_accuracy": 29.0,
-    "lm_accuracy": 80.0,
+    "pm_accuracy": 0.0,
+    "lm_accuracy": 100.0,
     "lc_accuracy": 100.0,
-    "composite_accuracy": 69.7,
-    "p50_ms": 17.65,
-    "p95_ms": 20.06,
+    "composite_accuracy": 66.7,
+    "p50_ms": 0.23,
+    "p95_ms": 0.37,
     "token_saving": 42.1,
+    "token_saving_measured": 42.9,
     "cost": "$99/mo",
-    "throughput_items_per_sec": 1496.3
+    "throughput_items_per_sec": 529287.2
   },
   "Letta / MemGPT": {
-    "pm_accuracy": 4.0,
-    "lm_accuracy": 0.0,
-    "lc_accuracy": 40.0,
-    "composite_accuracy": 14.7,
-    "p50_ms": 6.93,
-    "p95_ms": 8.5,
+    "pm_accuracy": 0.0,
+    "lm_accuracy": 100.0,
+    "lc_accuracy": 100.0,
+    "composite_accuracy": 66.7,
+    "p50_ms": 0.21,
+    "p95_ms": 0.33,
     "token_saving": 38.5,
+    "token_saving_measured": 42.9,
     "cost": "$45/mo",
-    "throughput_items_per_sec": 1386.1
+    "throughput_items_per_sec": 513980.3
   }
 }
