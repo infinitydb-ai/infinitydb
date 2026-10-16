@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/infinitydb-ai/infinitydb"><img src="https://img.shields.io/github/stars/infinitydb-ai/infinitydb?style=social" alt="GitHub Stars"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"/></a>
-  <a href="https://pypi.org/project/infinitydb/"><img src="https://img.shields.io/pypi/v/infinitydb" alt="PyPI"/></a>
+  <a href="https://pypi.org/project/infinitydb-ai/"><img src="https://img.shields.io/pypi/v/infinitydb-ai" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/infinitydb"><img src="https://img.shields.io/npm/v/infinitydb" alt="NPM"/></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python"/>
   <img src="https://img.shields.io/badge/node-%3E%3D18.0-green" alt="Node"/>
@@ -90,7 +90,7 @@ No lossy compression. Every layer is readable and inspectable.
 
 ### Python
 ```bash
-pip install infinitydb
+pip install infinitydb-ai
 ```
 
 Local development:

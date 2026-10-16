@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "infinitydb"
+name = "infinitydb-ai"
 version = "1.0.0"
 description = "InfinityDB - High-performance open-source agent memory engine"
 readme = "README.md"
