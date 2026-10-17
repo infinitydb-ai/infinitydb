@@ -39,7 +39,7 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 
 ---
 
-## Benchmark: World Leaderboard
+## Benchmark Comparison
 
 Evaluated across 300 test scenarios on identical hardware (Apple M2, 16GB) on PersonaMem, LongMemEval, and LoCoMo datasets.
 
