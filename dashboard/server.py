@@ -15,8 +15,9 @@ from typing import Any
 
 from infinitydb import InfinityDB
 
-PORT = 8080
-db = InfinityDB("infinity_dashboard.db")
+PORT = int(os.environ.get("PORT", "8080"))
+DB_PATH = os.environ.get("INFINITYDB_PATH", "infinity_dashboard.db")
+db = InfinityDB(DB_PATH)
 
 # Seed initial demonstration memories
 db.add("I am Dr. Robert Meyer. I work as a Principal Distributed Systems Engineer in Zurich.", user_id="demo_user")

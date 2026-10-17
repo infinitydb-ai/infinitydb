@@ -1,0 +1,16 @@
+__pycache__
+*.py[cod]
+.git
+.github
+.pytest_cache
+node_modules
+dist
+build
+*.egg-info
+.venv
+venv
+*.db
+*.db-wal
+*.db-shm
+.npmrc
+infinitydb-js

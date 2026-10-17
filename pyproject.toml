@@ -17,6 +17,9 @@ Homepage = "https://github.com/infinitydb-ai/infinitydb"
 Repository = "https://github.com/infinitydb-ai/infinitydb"
 Issues = "https://github.com/infinitydb-ai/infinitydb/issues"
 
+[project.scripts]
+infinitydb-mcp = "infinitydb.mcp_server:run_server"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
