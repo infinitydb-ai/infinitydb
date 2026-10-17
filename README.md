@@ -197,6 +197,16 @@ node infinitydb-js/test.js
 
 ---
 
+## Integrations
+
+InfinityDB provides drop-in memory adapters for leading agent orchestration frameworks:
+
+* **LangChain:** Drop-in `InfinityDBLangChainMemory` compatible with chains and agents. See [examples/langchain_integration.py](examples/langchain_integration.py).
+* **CrewAI:** Multi-agent shared memory with role-based partitioning and governance guardrails. See [examples/crewai_integration.py](examples/crewai_integration.py).
+* **Claude Desktop & Cursor (MCP):** Connects to any Model Context Protocol host over stdio. See [docs/MCP_SERVER.md](docs/MCP_SERVER.md).
+
+---
+
 ## Roadmap
 
 *   **v1.0 (Current):** Open-source L0-L6 Brain Engine, SQLite WAL mode, Python and Node.js SDKs, local dashboard, comprehensive benchmark suite.
