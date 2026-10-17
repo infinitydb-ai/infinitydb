@@ -14,6 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"/></a>
   <a href="https://pypi.org/project/infinitydb-ai/"><img src="https://img.shields.io/pypi/v/infinitydb-ai" alt="PyPI"/></a>
   <a href="https://www.npmjs.com/package/infinitydb"><img src="https://img.shields.io/npm/v/infinitydb" alt="NPM"/></a>
+  <a href="https://huggingface.co/spaces/Diwakarsrd/infinitydb"><img src="https://img.shields.io/badge/HuggingFace-Live_Demo-yellow" alt="Hugging Face Demo"/></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python"/>
   <img src="https://img.shields.io/badge/node-%3E%3D18.0-green" alt="Node"/>
 </p>
