@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/infinitydb-ai/infinitydb.git"
+    "url": "git+https://github.com/infinitydb-ai/infinitydb.git"
   },
   "homepage": "https://github.com/infinitydb-ai/infinitydb#readme",
   "bugs": {
@@ -21,6 +21,13 @@
     "rag",
     "sqlite",
     "long-term-memory"
+  ],
+  "author": "InfinityDB AI <contact@infinitydb.ai>",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node test.js"
