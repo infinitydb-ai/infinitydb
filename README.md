@@ -21,6 +21,7 @@
 
 <p align="center">
   <b>Agents remember. Humans innovate.</b><br/>
+  LangChain | CrewAI | MCP Compatible<br/>
   <a href="https://github.com/infinitydb-ai/infinitydb">github.com/infinitydb-ai/infinitydb</a>
 </p>
 
@@ -199,11 +200,41 @@ node infinitydb-js/test.js
 
 ## Integrations
 
-InfinityDB provides drop-in memory adapters for leading agent orchestration frameworks:
+InfinityDB provides drop-in adapters for leading agent frameworks. No cloud required.
 
-* **LangChain:** Drop-in `InfinityDBLangChainMemory` compatible with chains and agents. See [examples/langchain_integration.py](examples/langchain_integration.py).
-* **CrewAI:** Multi-agent shared memory with role-based partitioning and governance guardrails. See [examples/crewai_integration.py](examples/crewai_integration.py).
-* **Claude Desktop & Cursor (MCP):** Connects to any Model Context Protocol host over stdio. See [docs/MCP_SERVER.md](docs/MCP_SERVER.md).
+### LangChain
+Compatible with LangChain chains and agents.
+```python
+from examples.langchain_integration import InfinityDBLangChainMemory
+from infinitydb import InfinityDB
+
+db = InfinityDB("agent_memory.db")
+memory = InfinityDBLangChainMemory(db=db, user_id="sarah_c")
+```
+
+See `examples/langchain_integration.py` for full chain example.
+
+### CrewAI
+Shared memory with role-based partitioning and L4 governance guardrails for multi-agent teams.
+```python
+from examples.crewai_integration import InfinityDBCrewMemory
+from infinitydb import InfinityDB
+
+db = InfinityDB("agent_memory.db")
+memory = InfinityDBCrewMemory(db=db, agent_role="researcher")
+```
+
+See `examples/crewai_integration.py`.
+
+### Claude Desktop & Cursor (MCP)
+Model Context Protocol server over stdio. Works with any MCP host.
+```bash
+python -m infinitydb.mcp_server
+```
+
+See `docs/MCP_SERVER.md` for Claude Desktop and Cursor configuration.
+
+Registry: NPM `infinitydb` | PyPI `infinitydb-ai` | MCP Registry | Hugging Face Demo
 
 ---
 

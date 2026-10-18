@@ -14,18 +14,31 @@ from infinitydb import InfinityDB
 class InfinityDBCrewMemory:
     """Multi-agent shared memory provider for CrewAI workflows."""
 
-    def __init__(self, db_path: str = "crewai_shared_memory.db") -> None:
-        self.db = InfinityDB(db_path)
+    def __init__(
+        self,
+        db: Optional[Any] = None,
+        db_path: str = "crewai_shared_memory.db",
+        agent_role: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
+        if isinstance(db, str):
+            self.db = InfinityDB(db)
+        elif db is not None:
+            self.db = db
+        else:
+            self.db = InfinityDB(kwargs.get("db_path", db_path))
+        self.agent_role = agent_role or "default"
 
-    def save(self, value: str, agent_role: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def save(self, value: str, agent_role: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Store task outputs or findings from a specific agent role."""
-        meta_str = f" [role={agent_role}]"
-        log_id = self.db.add(f"{value}{meta_str}", user_id=agent_role)
+        role = agent_role or self.agent_role
+        meta_str = f" [role={role}]"
+        log_id = self.db.add(f"{value}{meta_str}", user_id=role)
         return log_id
 
     def search(self, query: str, agent_role: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
         """Search multi-agent shared memory with causal graph relations."""
-        user_id = agent_role if agent_role else "default"
+        user_id = agent_role or self.agent_role
         res = self.db.recall(query, user_id=user_id)
         
         results = []

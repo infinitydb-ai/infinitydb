@@ -6,7 +6,7 @@ with deterministic fact extraction, causal relations, and audit proofs.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from infinitydb import InfinityDB
 
@@ -16,12 +16,19 @@ class InfinityDBLangChainMemory:
 
     def __init__(
         self,
+        db: Optional[Any] = None,
         db_path: str = "langchain_agent.db",
         user_id: str = "default_user",
         memory_key: str = "chat_history",
         return_facts_only: bool = False,
+        **kwargs: Any,
     ) -> None:
-        self.db = InfinityDB(db_path)
+        if isinstance(db, str):
+            self.db = InfinityDB(db)
+        elif db is not None:
+            self.db = db
+        else:
+            self.db = InfinityDB(kwargs.get("db_path", db_path))
         self.user_id = user_id
         self.memory_key = memory_key
         self.return_facts_only = return_facts_only
