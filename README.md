@@ -234,7 +234,7 @@ python -m infinitydb.mcp_server
 
 See `docs/MCP_SERVER.md` for Claude Desktop and Cursor configuration.
 
-Registry: NPM `infinitydb` | PyPI `infinitydb-ai` | MCP Registry | Hugging Face Demo
+**Registry:** NPM `infinitydb` | PyPI `infinitydb-ai` | MCP Registry | Hugging Face Demo
 
 ---
 
