@@ -242,6 +242,28 @@ memory = InfinityDBCrewMemory(db=db, agent_role="researcher")
 
 See `examples/crewai_integration.py`.
 
+### LlamaIndex
+Drop-in conversational memory for LlamaIndex query engines, chat engines, and agent pipelines.
+```python
+from examples.llamaindex_integration import InfinityDBLlamaMemory
+
+memory = InfinityDBLlamaMemory(db_path="agent_memory.db", user_id="robert_m")
+context = memory.get(input_text="What are user requirements?")
+```
+
+See `examples/llamaindex_integration.py`.
+
+### Vercel AI SDK
+Middleware for Node.js / Next.js AI applications that enriches prompt context with sub-millisecond local memories.
+```javascript
+const { InfinityDBVercelMemory } = require("./examples/vercel_ai_integration");
+
+const memory = new InfinityDBVercelMemory({ userId: "alex_dev" });
+const enrichedPrompt = await memory.enrichPrompt("Generate component architecture");
+```
+
+See `examples/vercel_ai_integration.js`.
+
 ### Claude Desktop & Cursor (MCP)
 Model Context Protocol server over stdio. Works with any MCP host.
 ```bash
