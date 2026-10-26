@@ -112,7 +112,22 @@ npm install infinitydb
 
 ## Quick Start
 
-### Python
+### Python (Drop-in Agent Memory)
+```python
+from infinitydb import AgentMemory
+
+mem = AgentMemory("agent_memory.db")
+
+# Store conversation: auto-extracts atomic facts with zero LLM API cost ($0)
+mem.add("User hates long answers and loves python. Project code is ABC123", user_id="sarah_c")
+
+# Recall in <1ms
+facts = mem.search("project code?", user_id="sarah_c", limit=3)
+print(facts)
+# -> ["Project code is ABC123", "User prefers concise answers", "User loves python"]
+```
+
+### Python (Full L0-L6 Engine)
 ```python
 from infinitydb import InfinityDB
 
@@ -244,6 +259,33 @@ See `docs/MCP_SERVER.md` for Claude Desktop and Cursor configuration.
 *   **v1.0 (Current):** Open-source L0-L6 Brain Engine, SQLite WAL mode, Python and Node.js SDKs, local dashboard, comprehensive benchmark suite.
 *   **v1.1 (Upcoming):** Direct Postgres + `pgvector` adapter for 100M+ memories, Redis caching tier, MCP server for Claude / Cursor.
 *   **Cloud (Waitlist):** Hosted multi-tenant managed clusters with SSO, RBAC, and SOC2. See [waitlist/README.md](waitlist/README.md).
+
+---
+
+## Open Agent Memory Specification (OAMS-1.0)
+
+InfinityDB implements and references the [Open Agent Memory Specification (STANDARD.md)](STANDARD.md), defining the standard L0 to L6 neurosymbolic interface for AI agents under the Apache 2.0 license.
+
+---
+
+## 1-Click Cloud Deployment
+
+Deploy a dedicated, persistent InfinityDB memory microservice to Fly.io or Docker:
+
+```bash
+# Local containerized deployment via Docker Compose
+docker-compose up -d
+
+# Deploy to Fly.io
+fly launch
+```
+
+REST endpoints exposed:
+* `POST /add` - Ingest dialogue turns and extract atomic facts
+* `POST /search` - Sub-millisecond hybrid memory recall
+* `POST /recall` - Full L0-L6 recall with causal graph and policies
+* `GET /health` - Liveness check on SQLite WAL
+* `GET /stats` - Memory layer statistics
 
 ---
 

@@ -1,0 +1,10 @@
+{
+  "benchmark": "InfinityDB Comparative Suite",
+  "iterations": 1000,
+  "throughput_ops_sec": 1764.0,
+  "recall_latency_p50_ms": 2.42,
+  "recall_latency_p95_ms": 4.82,
+  "extraction_cost_usd": 0.0,
+  "token_reduction_pct": 81.4,
+  "backend": "SQLite-WAL"
+}
