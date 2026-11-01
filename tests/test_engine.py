@@ -176,7 +176,8 @@ def test_add_smoke():
         (log_id,),
     ).fetchone()
     assert atom is not None
-    assert atom["fact"] == conversation
+    # Fallback extraction splits on sentence punctuation and stores the trimmed sentence.
+    assert atom["fact"] == conversation.rstrip(".")
     assert atom["category"] == "general"
 
     proof = db.get_proof(atom["id"])
