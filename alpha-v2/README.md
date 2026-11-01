@@ -62,3 +62,37 @@ uses Ollama's `POST /api/embed` endpoint. You can inject a transport for tests
 or custom deployments. Model identity is exposed as metadata but is not yet
 persisted alongside each stored vector; do not mix vectors from different
 models or revisions in one search space.
+
+
+### Automatic embedding ingestion
+
+Embedding is opt-in: existing `add_memory()` and `add_memories()` remain
+model-free and make no provider calls. To create memories and their vectors
+together, use the explicit provider-backed methods:
+
+```python
+from infinitydb_next import MemoryStore, OllamaEmbeddingProvider
+
+provider = OllamaEmbeddingProvider("nomic-embed-text")
+with MemoryStore("demo.sqlite3") as store:
+    memory_id = store.add_memory_with_embedding(
+        "A fact to remember", provider, tenant_id="demo",
+        model_revision="nomic-embed-text:latest",
+    )
+    ids = store.add_memories_with_embeddings(
+        [
+            {"content": "First batch fact", "tenant_id": "demo"},
+            {"content": "Second batch fact", "tenant_id": "demo"},
+        ],
+        provider,
+        model_revision="nomic-embed-text:latest",
+    )
+```
+
+The provider is called before opening the SQLite write transaction. Batch
+vectors are validated for cardinality, finite non-zero values and consistent
+dimensions; memories, vectors and FTS rows are then committed atomically.
+Provider failures therefore create no partial memories. Batches use one
+provider call. Model revision is caller-supplied because providers may not
+expose an immutable revision identifier. Provider-backed ingestion is
+synchronous and does not add automatic retries or background queues.
