@@ -221,3 +221,66 @@ def test_importance_parameter_scales_extracted_fact_weight():
         "SELECT importance FROM l1_atoms WHERE user_id = ?", ("high",)
     ).fetchone()["importance"]
     assert low < high
+
+
+
+def test_fts_index_is_populated_and_retrieval_is_user_scoped():
+    db = InfinityDB()
+    db.add("I prefer PostgreSQL for transactional workloads.", user_id="tenant_a")
+    db.add("I prefer Redis for ephemeral cache workloads.", user_id="tenant_b")
+
+    indexed = db.conn.execute(
+        "SELECT count(*) FROM l1_atoms_fts WHERE l1_atoms_fts MATCH ?",
+        ('"PostgreSQL"',),
+    ).fetchone()[0]
+    assert indexed == 1
+
+    tenant_a = db.recall("PostgreSQL", user_id="tenant_a")
+    tenant_b = db.recall("PostgreSQL", user_id="tenant_b")
+    assert len(tenant_a["results"]) == 1
+    assert tenant_a["results"][0]["fact"].find("PostgreSQL") >= 0
+    assert tenant_b["results"] == []
+
+
+def test_fts_recall_does_not_return_unmatched_high_importance_memories():
+    db = InfinityDB()
+    db.add("I prefer Python for backend services.", user_id="fts-user", importance=1.0)
+    result = db.recall("quantum banana", user_id="fts-user")
+    assert result["results"] == []
+
+
+def test_fts_index_tracks_user_deletion():
+    db = InfinityDB()
+    db.add("I prefer SQLite for embedded storage.", user_id="delete-fts")
+    before = db.conn.execute(
+        "SELECT count(*) FROM l1_atoms_fts WHERE l1_atoms_fts MATCH ?",
+        ('"SQLite"',),
+    ).fetchone()[0]
+    assert before == 1
+
+    db.delete_user("delete-fts")
+    after = db.conn.execute(
+        "SELECT count(*) FROM l1_atoms_fts WHERE l1_atoms_fts MATCH ?",
+        ('"SQLite"',),
+    ).fetchone()[0]
+    assert after == 0
+
+
+def test_fts_index_rebuilds_for_existing_database(tmp_path):
+    db_path = str(tmp_path / "pre_fts.sqlite")
+    db = InfinityDB(db_path)
+    db.add("I prefer Rust for systems programming.", user_id="migration-user")
+    db.conn.execute("DROP TRIGGER IF EXISTS l1_atoms_fts_insert")
+    db.conn.execute("DROP TRIGGER IF EXISTS l1_atoms_fts_delete")
+    db.conn.execute("DROP TRIGGER IF EXISTS l1_atoms_fts_update")
+    db.conn.execute("DROP TABLE l1_atoms_fts")
+    db.conn.execute(
+        "DELETE FROM infinitydb_schema_meta WHERE key = 'l1_atoms_fts_version'"
+    )
+    db.conn.commit()
+    db.conn.close()
+
+    migrated = InfinityDB(db_path)
+    result = migrated.recall("Rust", user_id="migration-user")
+    assert len(result["results"]) == 1
+    migrated.conn.close()
