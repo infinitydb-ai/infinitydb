@@ -419,3 +419,28 @@ def test_temporal_recall_validates_as_of_and_user_deletion_removes_relations():
     assert db.conn.execute(
         "SELECT count(*) FROM l1_atom_relations"
     ).fetchone()[0] == 0
+
+def test_add_rolls_back_all_memory_layers_when_ingestion_fails():
+    """A failed extraction must not leave partially committed L0-L6 rows."""
+    db = InfinityDB()
+
+    def fail_persona_update(**kwargs):
+        raise RuntimeError("simulated persona persistence failure")
+
+    db._update_persona_with_conflict_resolution = fail_persona_update
+    with pytest.raises(RuntimeError, match="simulated persona persistence failure"):
+        db.add("I prefer Rust for reliable systems.", user_id="atomic-user")
+
+    for table in ("l0_logs", "l1_atoms", "l2_episodes", "l3_persona", "l6_proof"):
+        count = db.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        assert count == 0, f"{table} retained rows after failed ingestion"
+
+    # The connection remains usable after rollback.
+    db._update_persona_with_conflict_resolution = (
+        lambda **kwargs: None
+    )
+    db.add("I prefer Python for analytics.", user_id="atomic-user")
+    assert db.conn.execute(
+        "SELECT count(*) FROM l0_logs WHERE user_id = ?", ("atomic-user",)
+    ).fetchone()[0] == 1
+

@@ -236,6 +236,22 @@ class InfinityDB:
         session_id: str | None = None,
         importance: float = 0.9,
     ) -> str:
+        """Atomically ingest one conversation across all memory layers."""
+        with self.conn:
+            return self._add(
+                conversation=conversation,
+                user_id=user_id,
+                session_id=session_id,
+                importance=importance,
+            )
+
+    def _add(
+        self,
+        conversation: str,
+        user_id: str = "default",
+        session_id: str | None = None,
+        importance: float = 0.9,
+    ) -> str:
         """Ingest raw conversation or tool log into L0-L6 Brain pipeline.
 
         Executes deterministic rule-based extraction without an LLM call, constructs causal
@@ -343,7 +359,6 @@ class InfinityDB:
                     (ep_id, user_id, cause_part, effect_part, log_id, now),
                 )
 
-        self.conn.commit()
         return log_id
 
     def _update_persona_with_conflict_resolution(
