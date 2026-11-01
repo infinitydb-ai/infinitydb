@@ -58,7 +58,8 @@ class InfinityDB {
         INSERT INTO l1_atoms_fts(l1_atoms_fts, rowid, fact)
         VALUES ('delete', old.rowid, old.fact);
       END;
-      CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_update AFTER UPDATE OF fact ON l1_atoms BEGIN
+      CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_update AFTER UPDATE OF fact ON l1_atoms
+      WHEN old.fact <> new.fact BEGIN
         INSERT INTO l1_atoms_fts(l1_atoms_fts, rowid, fact)
         VALUES ('delete', old.rowid, old.fact);
         INSERT INTO l1_atoms_fts(rowid, fact) VALUES (new.rowid, new.fact);
