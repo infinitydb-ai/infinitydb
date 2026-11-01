@@ -2,6 +2,13 @@ const assert = require("assert");
 const { InfinityDB } = require("./index.js");
 
 console.log("[*] Running InfinityDB JavaScript test suite...");
+const fs = require("fs");
+const path = require("path");
+const policyFixture = JSON.parse(fs.readFileSync(
+  path.join(__dirname, "..", "tests", "fixtures", "sdk_policy_conformance.json"),
+  "utf8"
+));
+
 
 const db = new InfinityDB();
 
@@ -88,9 +95,7 @@ assert.strictEqual(proofDb.getProof(proofAtom.id).verified, false);
 
 
  // 10. SQLite durability across process-style reopen
-const fs = require("fs");
 const os = require("os");
-const path = require("path");
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-sqlite-"));
 const dbPath = path.join(tempDir, "memory.sqlite");
 try {
@@ -284,3 +289,17 @@ assert.strictEqual(fallbackAtoms[1].fact, "A separate staging environment valida
 fallback.close();
 
 console.log("[PASS] All JavaScript tests passed successfully!");
+
+// Shared cross-SDK policy conformance fixture.
+const conformanceDb = new InfinityDB();
+const globalPolicy = policyFixture.global_policy;
+const tenantPolicy = policyFixture.tenant_policy;
+conformanceDb.addPolicy(globalPolicy.rule, globalPolicy.domain, globalPolicy.priority);
+conformanceDb.addPolicy(tenantPolicy.rule, tenantPolicy.domain, tenantPolicy.priority, tenantPolicy.tenant_id);
+const policyRules = userId => conformanceDb.recall("policy", userId ? { userId } : {}).policies.map(p => p.rule);
+assert.deepStrictEqual(policyRules(policyFixture.tenant_a), policyFixture.expected.tenant_a);
+assert.deepStrictEqual(policyRules(policyFixture.tenant_b), policyFixture.expected.tenant_b);
+assert.deepStrictEqual(policyRules(), policyFixture.expected.unscoped);
+conformanceDb.deleteUser(policyFixture.tenant_a);
+assert.deepStrictEqual(policyRules(policyFixture.tenant_a), policyFixture.expected.tenant_a_after_delete);
+conformanceDb.close();
