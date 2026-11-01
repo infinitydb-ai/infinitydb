@@ -343,7 +343,7 @@ class InfinityDB {
     if (this.relations.some(r => r.oldAtomId === oldAtomId && r.newAtomId === newAtomId)) {
       throw new Error("supersession relation already exists");
     }
-    const createdAt = Date.now() / 1000;
+    const createdAt = Math.max(Date.now() / 1000, oldAtom.ts, newAtom.ts) + 0.001;
     const relation = { oldAtomId, newAtomId, userId, relation: "supersedes", createdAt };
     this.relations.push(relation);
     if (this._storage) {
