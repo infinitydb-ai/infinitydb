@@ -41,6 +41,27 @@ export class InfinityDBClient {
     return this.request("/v1/search", { query, tenant_id, limit });
   }
 
+  setEmbedding(memory_id: string, embedding: number[], tenant_id = "default"): Promise<{ stored: boolean }> {
+    return this.request(`/v1/memories/${encodeURIComponent(memory_id)}/embedding`, {
+      embedding,
+      tenant_id,
+    });
+  }
+
+  searchVector(
+    embedding: number[],
+    tenant_id = "default",
+    limit = 10,
+    kinds: string[] = [],
+  ): Promise<SearchHit[]> {
+    return this.request("/v1/search/vector", {
+      embedding,
+      tenant_id,
+      limit,
+      kinds,
+    });
+  }
+
   context(query: string, tenant_id = "default", limit = 10): Promise<{
     query: string;
     memories: Array<{ id: string; content: string; kind: string }>;
