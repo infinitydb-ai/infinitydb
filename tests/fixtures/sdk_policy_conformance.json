@@ -1,0 +1,31 @@
+{
+  "description": "Shared expected behavior for tenant-scoped and global L4 policies across SDKs.",
+  "global_policy": {
+    "rule": "Global security baseline",
+    "domain": "security",
+    "priority": 1
+  },
+  "tenant_policy": {
+    "rule": "Tenant A retention rule",
+    "domain": "retention",
+    "priority": 2,
+    "tenant_id": "tenant_a"
+  },
+  "tenant_a": "tenant_a",
+  "tenant_b": "tenant_b",
+  "expected": {
+    "tenant_a": [
+      "Tenant A retention rule",
+      "Global security baseline"
+    ],
+    "tenant_b": [
+      "Global security baseline"
+    ],
+    "unscoped": [
+      "Global security baseline"
+    ],
+    "tenant_a_after_delete": [
+      "Global security baseline"
+    ]
+  }
+}
