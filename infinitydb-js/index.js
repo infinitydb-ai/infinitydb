@@ -547,8 +547,9 @@ class InfinityDB {
       }
     }
 
-    // Policies
+    // Global policies apply to every tenant; scoped policies require a matching userId.
     const policies = Array.from(this.policies.values())
+      .filter(policy => !policy.tenantId || (userId && policy.tenantId === userId))
       .sort((a, b) => b.priority - a.priority)
       .slice(0, 3);
 
@@ -604,10 +605,19 @@ class InfinityDB {
     return out;
   }
 
-  addPolicy(rule, domain = "general", priority = 1.0) {
+  addPolicy(rule, domain = "general", priority = 1.0, tenantId = null) {
     this._refreshState();
-    const pid = `L4_${this._sha256(rule + domain).slice(0, 12)}`;
-    this.policies.set(pid, { id: pid, rule, domain, priority, createdAt: Date.now() / 1000 });
+    if (typeof rule !== "string" || !rule.trim()) throw new TypeError("rule must be a non-empty string");
+    if (typeof domain !== "string" || !domain.trim()) throw new TypeError("domain must be a non-empty string");
+    if (typeof priority !== "number" || !Number.isFinite(priority)) throw new TypeError("priority must be a finite number");
+    if (tenantId !== null && (typeof tenantId !== "string" || !tenantId.trim())) {
+      throw new TypeError("tenantId must be null or a non-empty string");
+    }
+    const scope = tenantId || "global";
+    const pid = `L4_${this._sha256(rule.trim() + domain.trim() + scope).slice(0, 16)}`;
+    const existing = this.policies.get(pid);
+    this.policies.set(pid, { id: pid, rule: rule.trim(), domain: domain.trim(), priority,
+      tenantId, createdAt: existing?.createdAt ?? Date.now() / 1000 });
     this._persist();
     return pid;
   }
@@ -640,6 +650,9 @@ class InfinityDB {
         this.proofs.delete(id);
         c1++;
       }
+    }
+    for (const [id, policy] of Array.from(this.policies.entries())) {
+      if (policy.tenantId === userId) this.policies.delete(id);
     }
     for (const [id, ep] of Array.from(this.episodes.entries())) {
       if (ep.userId === userId) { this.episodes.delete(id); c2++; }
