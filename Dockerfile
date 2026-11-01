@@ -13,7 +13,9 @@ RUN mkdir -p /data && chmod 777 /data
 ENV INFINITYDB_PATH=/data/infinity.db
 ENV PORT=8080
 
-# Install dependencies and infinitydb package
+# Install dependencies and infinitydb package.
+# Hatchling reads the project README while preparing package metadata.
+COPY README.md ./README.md
 COPY pyproject.toml .
 COPY infinitydb/ ./infinitydb/
 COPY dashboard/ ./dashboard/
