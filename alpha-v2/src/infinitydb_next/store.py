@@ -168,7 +168,7 @@ class MemoryStore:
                 "SELECT id FROM memories WHERE tenant_id=? AND id IN (?,?)",
                 (tenant_id, src_id, dst_id),
             ).fetchall()
-            if len({row["id"] for row in rows}) != 2:
+            if len({row["id"] for row in rows}) != len({src_id, dst_id}):
                 raise ValueError("both edge endpoints must exist in the specified tenant")
             self.db.execute("INSERT OR REPLACE INTO edges VALUES(?,?,?,?,?)",
                             (tenant_id, src_id, dst_id, relation, weight))
