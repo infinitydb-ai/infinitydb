@@ -684,15 +684,22 @@ class InfinityDB:
 
         scope = tenant_id or "global"
         pid = f"L4_{self._sha256(rule + domain + scope)[:16]}"
-        self.conn.execute(
-            """
-            INSERT OR REPLACE INTO l4_policies
-            (id, rule, domain, priority, created_at, tenant_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (pid, rule.strip(), domain.strip(), float(priority), time.time(), tenant_id),
-        )
-        self.conn.commit()
+        # Update mutable policy fields without deleting/recreating the row.
+        # In particular, created_at records the policy's original registration time.
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO l4_policies
+                (id, rule, domain, priority, created_at, tenant_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    rule = excluded.rule,
+                    domain = excluded.domain,
+                    priority = excluded.priority,
+                    tenant_id = excluded.tenant_id
+                """,
+                (pid, rule.strip(), domain.strip(), float(priority), time.time(), tenant_id),
+            )
         return pid
 
     def export_graph(self, user_id: str = "default", format: str = "mermaid") -> str:

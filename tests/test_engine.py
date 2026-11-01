@@ -501,3 +501,59 @@ def test_delete_user_rolls_back_all_layers_if_a_delete_fails():
         "SELECT count(*) FROM l6_proof"
     ).fetchone()[0] >= 1
 
+
+
+def test_l4_policy_update_preserves_original_created_at():
+    db = InfinityDB()
+    policy_id = db.add_policy(
+        "Require encrypted transport", domain="security", priority=1.0,
+        tenant_id="tenant-policy-update",
+    )
+    original = db.conn.execute(
+        "SELECT created_at FROM l4_policies WHERE id = ?", (policy_id,)
+    ).fetchone()["created_at"]
+
+    # A delete trigger would fire with INSERT OR REPLACE, but not with an
+    # in-place UPSERT. This protects row identity and dependent references.
+    db.conn.execute(
+        """CREATE TRIGGER reject_policy_delete BEFORE DELETE ON l4_policies
+           BEGIN SELECT RAISE(ABORT, 'policy row must not be replaced'); END"""
+    )
+    db.conn.commit()
+
+    updated_id = db.add_policy(
+        "Require encrypted transport", domain="security", priority=4.0,
+        tenant_id="tenant-policy-update",
+    )
+    row = db.conn.execute(
+        "SELECT rule, domain, priority, created_at, tenant_id "
+        "FROM l4_policies WHERE id = ?", (policy_id,)
+    ).fetchone()
+
+    assert updated_id == policy_id
+    assert row["priority"] == 4.0
+    assert row["created_at"] == original
+    assert row["tenant_id"] == "tenant-policy-update"
+
+
+def test_l4_policy_upsert_rolls_back_when_update_fails():
+    db = InfinityDB()
+    policy_id = db.add_policy("Original rule", domain="security", priority=1.0)
+    original = db.conn.execute(
+        "SELECT rule, priority, created_at FROM l4_policies WHERE id = ?",
+        (policy_id,),
+    ).fetchone()
+    db.conn.execute(
+        """CREATE TRIGGER reject_policy_update BEFORE UPDATE ON l4_policies
+           BEGIN SELECT RAISE(ABORT, 'simulated policy update failure'); END"""
+    )
+    db.conn.commit()
+
+    with pytest.raises(Exception, match="simulated policy update failure"):
+        db.add_policy("Original rule", domain="security", priority=5.0)
+
+    after = db.conn.execute(
+        "SELECT rule, priority, created_at FROM l4_policies WHERE id = ?",
+        (policy_id,),
+    ).fetchone()
+    assert tuple(after) == tuple(original)
