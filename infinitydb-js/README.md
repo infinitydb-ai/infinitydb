@@ -6,7 +6,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-InfinityDB gives AI agents long-term neurosymbolic memory with deterministic recall, sub-millisecond latency, dynamic persona conflict resolution, and cryptographic SHA-256 audit proofs.
+InfinityDB gives AI agents long-term neurosymbolic memory with deterministic recall, dynamic persona conflict resolution, and cryptographic SHA-256 audit proofs. Recall and write latency depend on dataset size, hardware, storage configuration, and workload.
 
 ---
 
@@ -163,7 +163,7 @@ Back up the database using SQLite's backup facilities.
 
 | Layer | Component | Function |
 | :--- | :--- | :--- |
-| **L0** | Raw Interaction Store | Append-only raw logs with sub-millisecond writes |
+| **L0** | Raw Interaction Store | Append-only raw interaction logs |
 | **L1** | Atomic Fact Extractor | Deterministic, zero-hallucination semantic extraction |
 | **L2** | Episodic Graph | Causal edge tracking between related memory episodes |
 | **L3** | Dynamic Persona | Identity state with automatic chronological conflict resolution |

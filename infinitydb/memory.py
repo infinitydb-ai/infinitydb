@@ -2,7 +2,7 @@
 
 Provides a drop-in 3-line API for autonomous AI agents:
 - Zero external LLM token extraction costs ($0)
-- Sub-millisecond local SQLite WAL recall (<1ms)
+- Local SQLite WAL-backed memory retrieval
 - Causal episode tracking and conflict auto-resolution
 - Cryptographic proof verification
 """
@@ -15,7 +15,7 @@ from infinitydb.core.engine import InfinityDB, Memory as ItemMemory
 
 
 class AgentMemory:
-    """High-level Agent Memory engine with sub-millisecond retrieval."""
+    """High-level Agent Memory engine backed by local persistent storage."""
 
     def __init__(
         self,
