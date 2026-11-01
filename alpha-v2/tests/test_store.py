@@ -434,6 +434,58 @@ def test_embedding_cache_survives_reopen():
             second.close()
 
 
+
+def test_supersede_memory_preserves_history_and_links_successor(store):
+    original = store.add_memory("The service runs in region A", tenant_id="history",
+                                valid_from=10.0)
+    successor = store.supersede_memory(
+        original, "The service now runs in region B", tenant_id="history",
+        at=20.0, raw_evidence="deployment record 42",
+    )
+
+    assert store.get(original, tenant_id="history").valid_to == 20.0
+    current = store.get(successor, tenant_id="history")
+    assert current.content == "The service now runs in region B"
+    assert current.valid_from == 20.0
+    assert store.search("region A", tenant_id="history", as_of=19.0)
+    assert not store.search("region A", tenant_id="history", as_of=20.0)
+    assert store.search("region B", tenant_id="history", as_of=20.0)
+    edge = store.db.execute(
+        "SELECT relation FROM edges WHERE tenant_id=? AND src_id=? AND dst_id=?",
+        ("history", original, successor),
+    ).fetchone()
+    assert edge["relation"] == "supersedes"
+    assert store.evidence_for(successor, tenant_id="history")[0]["raw_content"] == "deployment record 42"
+
+
+def test_supersede_memory_rejects_missing_closed_and_invalid_time(store):
+    with pytest.raises(ValueError, match="does not exist"):
+        store.supersede_memory("missing", "replacement", tenant_id="history")
+
+    original = store.add_memory("original fact", tenant_id="history", valid_from=10.0)
+    store.supersede_memory(original, "replacement", tenant_id="history", at=20.0)
+    with pytest.raises(ValueError, match="already superseded"):
+        store.supersede_memory(original, "another replacement", tenant_id="history", at=30.0)
+
+    other = store.add_memory("future fact", tenant_id="history", valid_from=50.0)
+    with pytest.raises(ValueError, match="cannot precede"):
+        store.supersede_memory(other, "too early", tenant_id="history", at=40.0)
+
+    with pytest.raises(ValueError, match="finite"):
+        store.supersede_memory(other, "not a timestamp", tenant_id="history", at=float("nan"))
+
+
+def test_supersede_memory_rolls_back_all_writes_on_failure(store, monkeypatch):
+    original = store.add_memory("rollback original", tenant_id="history")
+    def fail(*args, **kwargs):
+        raise RuntimeError("evidence write failed")
+    monkeypatch.setattr(store, "_append_evidence", fail)
+    with pytest.raises(RuntimeError, match="evidence write failed"):
+        store.supersede_memory(original, "rollback successor", tenant_id="history",
+                               raw_evidence="failure")
+    assert store.get(original, tenant_id="history").valid_to is None
+    assert store.search("rollback successor", tenant_id="history") == []
+
 def test_bounded_graph_traversal_returns_explainable_shortest_paths(store):
     seed = store.add_memory("seed", tenant_id="graph")
     middle = store.add_memory("middle", tenant_id="graph")
