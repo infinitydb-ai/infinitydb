@@ -26,6 +26,15 @@ class VectorSearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100)
     kinds: list[str] = Field(default_factory=list)
 
+class HybridSearchRequest(BaseModel):
+    query: str
+    embedding: list[float]
+    tenant_id: str = "default"
+    limit: int = Field(default=10, ge=1, le=100)
+    kinds: list[str] = Field(default_factory=list)
+    rrf_k: int = Field(default=60, ge=1, le=1000)
+
+
 class SetEmbeddingRequest(BaseModel):
     embedding: list[float]
     tenant_id: str = "default"
@@ -65,6 +74,20 @@ def vector_search(body: VectorSearchRequest) -> list[dict[str, Any]]:
         hits = store.search_vector(
             body.embedding, tenant_id=body.tenant_id,
             limit=body.limit, kinds=body.kinds or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return [{"id": hit.memory.id, "content": hit.memory.content,
+             "kind": hit.memory.kind, "score": hit.score,
+             "matched_by": hit.matched_by} for hit in hits]
+
+
+@app.post("/v1/search/hybrid")
+def hybrid_search(body: HybridSearchRequest) -> list[dict[str, Any]]:
+    try:
+        hits = store.search_hybrid(
+            body.query, body.embedding, tenant_id=body.tenant_id,
+            limit=body.limit, kinds=body.kinds or None, rrf_k=body.rrf_k,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
