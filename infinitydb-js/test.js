@@ -404,6 +404,8 @@ assert.strictEqual(
   1
 );
 deleteRollbackDb._storage.exec("DROP TRIGGER reject_tenant_atom_delete");
+// Deletion must not perform a second persistence transaction after the durable commit.
+deleteRollbackDb._persist = () => { throw new Error("unexpected second persistence pass"); };
 const deleteRollbackResult = deleteRollbackDb.deleteUser("delete_rollback_tenant");
 assert.strictEqual(deleteRollbackResult.l0LogsDeleted, 1);
 assert.strictEqual(deleteRollbackResult.l1AtomsDeleted, 1);
@@ -412,5 +414,12 @@ assert.strictEqual(deleteRollbackDb.logs.size, 0);
 assert.strictEqual(deleteRollbackDb.atoms.size, 0);
 assert.strictEqual(deleteRollbackDb.proofs.size, 0);
 assert.strictEqual(deleteRollbackDb.policies.size, 0);
+assert.strictEqual(deleteRollbackDb._persisted.logs.size, 0);
+assert.strictEqual(deleteRollbackDb._persisted.atoms.size, 0);
 deleteRollbackDb.close();
+const deleteRollbackReopened = new InfinityDB({ dbPath: deleteRollbackPath });
+assert.strictEqual(deleteRollbackReopened.logs.size, 0);
+assert.strictEqual(deleteRollbackReopened.atoms.size, 0);
+assert.strictEqual(deleteRollbackReopened.policies.size, 0);
+deleteRollbackReopened.close();
 fs.rmSync(deleteRollbackDir, { recursive: true, force: true });
