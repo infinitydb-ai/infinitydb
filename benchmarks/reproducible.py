@@ -86,10 +86,12 @@ def run(iterations: int, output: str | None = None) -> dict[str, Any]:
 
         page_count = db.conn.execute("PRAGMA page_count").fetchone()[0]
         page_size = db.conn.execute("PRAGMA page_size").fetchone()[0]
-        db_bytes = db_path.stat().st_size if db_path.exists() else 0
         sqlite_version = sqlite3.sqlite_version
         stats = db.stats()
         db.conn.close()
+        db_bytes = db_path.stat().st_size if db_path.exists() else 0
+        wal_path = Path(str(db_path) + "-wal")
+        wal_bytes = wal_path.stat().st_size if wal_path.exists() else 0
 
     result: dict[str, Any] = {
         "benchmark": "infinitydb-python-sqlite-local",
@@ -108,7 +110,9 @@ def run(iterations: int, output: str | None = None) -> dict[str, Any]:
             "samples": len(recall_latencies_ms),
         },
         "storage": {
-            "sqlite_file_bytes": db_bytes,
+            "sqlite_file_bytes_after_close": db_bytes,
+            "wal_file_bytes_after_close": wal_bytes,
+            "database_and_wal_bytes": db_bytes + wal_bytes,
             "page_count": page_count,
             "page_size_bytes": page_size,
         },
