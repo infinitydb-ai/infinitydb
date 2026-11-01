@@ -362,7 +362,7 @@ class InfinityDB {
     if (!extractedAny) {
       // Store offsets for the exact trimmed sentence so L6 verifies the
       // original source range rather than an unrelated prefix of the log.
-      const sentencePattern = /[^.!?\\n]+/g;
+      const sentencePattern = /[^.!?\n]+/g;
       let sentenceMatch;
       let extractedCount = 0;
       while ((sentenceMatch = sentencePattern.exec(conversation)) !== null && extractedCount < 3) {
