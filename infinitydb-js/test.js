@@ -524,3 +524,57 @@ assert.strictEqual(snapshotReader.atoms.size, 1);
 snapshotReader.close();
 snapshotWriter.close();
 fs.rmSync(snapshotDir, { recursive: true, force: true });
+
+
+// Policy writes and legacy-key deletes must restore memory when SQLite rejects persistence.
+const policyRollbackDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-policy-rollback-"));
+const policyRollbackPath = path.join(policyRollbackDir, "policy-rollback.sqlite");
+const policyRollbackDb = new InfinityDB({ dbPath: policyRollbackPath });
+const originalPolicyId = policyRollbackDb.addPolicy("Keep audit records", "security", 1);
+const originalPolicy = { ...policyRollbackDb.policies.get(originalPolicyId) };
+policyRollbackDb._storage.exec(`
+  CREATE TRIGGER reject_policy_insert
+  BEFORE INSERT ON l4_policies
+  BEGIN
+    SELECT RAISE(ABORT, 'simulated policy insert failure');
+  END;
+`);
+assert.throws(
+  () => policyRollbackDb.addPolicy("Never expose credentials", "security", 2),
+  /simulated policy insert failure/
+);
+assert.strictEqual(policyRollbackDb.policies.size, 1);
+assert.deepStrictEqual(policyRollbackDb.policies.get(originalPolicyId), originalPolicy);
+assert.strictEqual(
+  policyRollbackDb._storage.prepare("SELECT count(*) AS count FROM l4_policies").get().count,
+  1
+);
+policyRollbackDb._storage.exec("DROP TRIGGER reject_policy_insert");
+const updatedPolicyId = policyRollbackDb.addPolicy("Keep audit records", "security", 3);
+assert.strictEqual(updatedPolicyId, originalPolicyId);
+assert.strictEqual(policyRollbackDb.policies.get(originalPolicyId).priority, 3);
+
+policyRollbackDb.put("rollback:key", "durable legacy value");
+policyRollbackDb._storage.exec(`
+  CREATE TRIGGER reject_legacy_delete
+  BEFORE DELETE ON legacy_memories
+  BEGIN
+    SELECT RAISE(ABORT, 'simulated legacy delete failure');
+  END;
+`);
+assert.throws(() => policyRollbackDb.delete("rollback:key"), /simulated legacy delete failure/);
+assert.strictEqual(policyRollbackDb.get("rollback:key").content, "durable legacy value");
+assert.strictEqual(
+  policyRollbackDb._storage.prepare("SELECT count(*) AS count FROM legacy_memories WHERE memory_key=?")
+    .get("rollback:key").count,
+  1
+);
+policyRollbackDb._storage.exec("DROP TRIGGER reject_legacy_delete");
+assert.strictEqual(policyRollbackDb.delete("rollback:key"), true);
+assert.strictEqual(policyRollbackDb.get("rollback:key"), null);
+policyRollbackDb.close();
+const policyRollbackReopened = new InfinityDB({ dbPath: policyRollbackPath });
+assert.strictEqual(policyRollbackReopened.policies.get(originalPolicyId).priority, 3);
+assert.strictEqual(policyRollbackReopened.get("rollback:key"), null);
+policyRollbackReopened.close();
+fs.rmSync(policyRollbackDir, { recursive: true, force: true });
