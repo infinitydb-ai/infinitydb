@@ -29,6 +29,8 @@ CREATE INDEX IF NOT EXISTS idx_mem_temporal ON memories(tenant_id, valid_from, v
 CREATE TABLE IF NOT EXISTS embeddings (
  memory_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
  dimensions INTEGER NOT NULL, vector_json TEXT NOT NULL,
+ provider TEXT NOT NULL DEFAULT 'unknown', model TEXT NOT NULL DEFAULT 'unknown',
+ model_revision TEXT,
  FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_embeddings_tenant ON embeddings(tenant_id, dimensions);
@@ -58,7 +60,23 @@ class MemoryStore:
         self.db.execute("PRAGMA temp_store=MEMORY")
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
+        self._migrate_embedding_metadata()
         self._fts = self._init_fts()
+
+    def _migrate_embedding_metadata(self) -> None:
+        """Additive, idempotent migration for databases created before model metadata."""
+        columns = {
+            row["name"] for row in self.db.execute("PRAGMA table_info(embeddings)")
+        }
+        additions = (
+            ("provider", "TEXT NOT NULL DEFAULT 'unknown'"),
+            ("model", "TEXT NOT NULL DEFAULT 'unknown'"),
+            ("model_revision", "TEXT"),
+        )
+        with self.db:
+            for name, definition in additions:
+                if name not in columns:
+                    self.db.execute(f"ALTER TABLE embeddings ADD COLUMN {name} {definition}")
 
     @staticmethod
     def _tenant_key(tenant_id: str) -> str:
@@ -193,8 +211,13 @@ class MemoryStore:
         return values
 
     def set_embedding(self, memory_id: str, vector: Iterable[float], *,
-                      tenant_id: str = "default") -> None:
+                      tenant_id: str = "default", provider: str = "unknown",
+                      model: str = "unknown", model_revision: str | None = None) -> None:
         values = self._validated_vector(vector)
+        if not provider.strip() or not model.strip():
+            raise ValueError("embedding provider and model must not be empty")
+        if model_revision is not None and not model_revision.strip():
+            raise ValueError("model_revision must be non-empty when provided")
         with self._lock, self.db:
             exists = self.db.execute(
                 "SELECT 1 FROM memories WHERE id=? AND tenant_id=?",
@@ -203,30 +226,48 @@ class MemoryStore:
             if exists is None:
                 raise ValueError("memory does not exist in the specified tenant")
             self.db.execute(
-                """INSERT INTO embeddings(memory_id,tenant_id,dimensions,vector_json)
-                   VALUES(?,?,?,?) ON CONFLICT(memory_id) DO UPDATE SET
+                """INSERT INTO embeddings(
+                       memory_id,tenant_id,dimensions,vector_json,provider,model,model_revision
+                   ) VALUES(?,?,?,?,?,?,?) ON CONFLICT(memory_id) DO UPDATE SET
                    tenant_id=excluded.tenant_id, dimensions=excluded.dimensions,
-                   vector_json=excluded.vector_json""",
-                (memory_id, tenant_id, len(values), json.dumps(values, separators=(",", ":"))),
+                   vector_json=excluded.vector_json, provider=excluded.provider,
+                   model=excluded.model, model_revision=excluded.model_revision""",
+                (memory_id, tenant_id, len(values), json.dumps(values, separators=(",", ":")),
+                 provider, model, model_revision),
             )
 
     def search_vector(self, query_embedding: Iterable[float], *,
                       tenant_id: str = "default", limit: int = 10,
                       kinds: Iterable[str] | None = None,
-                      as_of: float | None = None) -> list[SearchHit]:
+                      as_of: float | None = None,
+                      provider: str | None = None, model: str | None = None,
+                      model_revision: str | None = None) -> list[SearchHit]:
         if limit < 1:
             return []
+        if model_revision is not None and (provider is None or model is None):
+            raise ValueError("provider and model are required when filtering by model_revision")
         query = self._validated_vector(query_embedding)
         now = time.time() if as_of is None else as_of
         kind_values = list(kinds or [])
         kind_clause = (" AND m.kind IN (" + ",".join("?" for _ in kind_values) + ")") if kind_values else ""
+        model_filters = ""
+        model_params: list[Any] = []
+        if provider is not None:
+            model_filters += " AND e.provider=?"
+            model_params.append(provider)
+        if model is not None:
+            model_filters += " AND e.model=?"
+            model_params.append(model)
+        if model_revision is not None:
+            model_filters += " AND e.model_revision=?"
+            model_params.append(model_revision)
         with self._lock:
             rows = self.db.execute(
                 f"""SELECT m.*, e.vector_json FROM embeddings e
                     JOIN memories m ON m.id=e.memory_id AND m.tenant_id=e.tenant_id
                     WHERE e.tenant_id=? AND e.dimensions=? AND m.valid_from<=?
-                    AND (m.valid_to IS NULL OR m.valid_to>?) {kind_clause}""",
-                [tenant_id, len(query), now, now, *kind_values],
+                    AND (m.valid_to IS NULL OR m.valid_to>?) {kind_clause} {model_filters}""",
+                [tenant_id, len(query), now, now, *kind_values, *model_params],
             ).fetchall()
         query_norm = math.sqrt(sum(value * value for value in query))
         scored: list[tuple[sqlite3.Row, float]] = []
@@ -247,6 +288,8 @@ class MemoryStore:
         tenant_id: str = "default", limit: int = 10,
         kinds: Iterable[str] | None = None, as_of: float | None = None,
         rrf_k: int = 60, candidate_limit: int | None = None,
+        provider: str | None = None, model: str | None = None,
+        model_revision: str | None = None,
     ) -> list[SearchHit]:
         """Fuse lexical and exact-vector rankings with deterministic RRF.
 
@@ -266,7 +309,8 @@ class MemoryStore:
         )
         semantic = self.search_vector(
             query_embedding, tenant_id=tenant_id, limit=candidates,
-            kinds=kinds, as_of=as_of,
+            kinds=kinds, as_of=as_of, provider=provider, model=model,
+            model_revision=model_revision,
         )
         fused: dict[str, tuple[Memory, float, set[str]]] = {}
         for ranked_hits in (lexical, semantic):
