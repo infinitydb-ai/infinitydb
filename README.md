@@ -184,6 +184,17 @@ Open `http://localhost:8080` to inspect:
 
 ---
 
+## SQLite durability
+
+For file-backed databases, both SDKs use WAL journaling with
+`synchronous=FULL`. In WAL mode, SQLite synchronizes the write-ahead log at commit,
+providing stronger commit durability at a potential write-throughput cost. Actual
+durability still depends on the filesystem, storage device, operating system, and their
+honoring of synchronization requests. In-memory databases do not configure file-backed
+WAL settings.
+
+---
+
 ## Resource lifecycle (Python)
 
 Close persistent and in-memory database handles when the application is finished with
