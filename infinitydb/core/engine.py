@@ -182,6 +182,15 @@ class InfinityDB:
         edges, updates persona profile with conflict auto-resolution, and links
         cryptographic proof records.
         """
+        if not isinstance(conversation, str) or not conversation.strip():
+            raise ValueError("conversation cannot be empty")
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+        if not isinstance(importance, (int, float)) or isinstance(importance, bool):
+            raise TypeError("importance must be a number between 0 and 1")
+        if not 0.0 <= float(importance) <= 1.0:
+            raise ValueError("importance must be between 0 and 1")
+
         now = time.time()
         self._seq += 1
         log_id = f"L0_{self._sha256(conversation + str(now) + str(self._seq))[:16]}"
@@ -227,7 +236,7 @@ class InfinityDB:
                 (id, user_id, fact, category, source_id, importance, access_count, ts)
                 VALUES (?, ?, ?, ?, ?, ?, 0, ?)
                 """,
-                (atom_id, user_id, fact, cat, log_id, weight, now),
+                (atom_id, user_id, fact, cat, log_id, weight * float(importance), now),
             )
 
             # L6: Cryptographic Proof Record
@@ -333,6 +342,15 @@ class InfinityDB:
         importance weighting, and L5 Ebbinghaus time-decay scoring.
         Delivers sub-5ms p95 recall with full cryptographic proof citations.
         """
+        if not isinstance(query, str):
+            raise TypeError("query must be a string")
+        if not isinstance(n, int) or isinstance(n, bool):
+            raise TypeError("n must be a positive integer")
+        if n < 1:
+            raise ValueError("n must be a positive integer")
+        if user_id is not None and (not isinstance(user_id, str) or not user_id.strip()):
+            raise ValueError("user_id cannot be empty")
+
         start_time = time.perf_counter()
         q_terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 1]
         now = time.time()
@@ -344,8 +362,8 @@ class InfinityDB:
             sql += " WHERE user_id = ?"
             params.append(user_id)
 
-        cur = self.conn.execute(sql, params)
-        rows = cur.fetchall()
+        cur = self.conn.execute(sql, params) if q_terms else None
+        rows = cur.fetchall() if cur is not None else []
 
         scored_results = []
         atom_ids_accessed = []
@@ -426,7 +444,9 @@ class InfinityDB:
             "causal_graph": causal_insights,
             "policies": relevant_policies,
             "latency_ms": round(elapsed_ms, 2),
-            "tokens_saved": "81.4%",
+            # Token savings depend on the caller's prompt construction and tokenizer;
+            # the engine cannot truthfully report a universal percentage.
+            "tokens_saved": None,
             "proof_available": True,
         }
 
