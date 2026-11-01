@@ -197,7 +197,12 @@ try {
 
   incremental.add("I prefer Rust for systems programming.", "incremental_user");
   const verify = new schemaDb(incrementalPath);
-  assert.strictEqual(verify.prepare("SELECT count(*) AS n FROM write_audit").get().n, 0);
+  // Updating a preference legitimately updates its persona row; no historical
+  // log, atom, episode, policy, or proof row should be rewritten.
+  const updatedTables = verify.prepare(
+    "SELECT table_name, count(*) AS n FROM write_audit GROUP BY table_name"
+  ).all();
+  assert.deepStrictEqual(updatedTables, [{ table_name: "l3_personas", n: 1 }]);
   assert.strictEqual(verify.prepare("SELECT count(*) AS n FROM l0_logs").get().n, 2);
   verify.close();
 
