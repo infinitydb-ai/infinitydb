@@ -142,15 +142,21 @@ try {
     seq: 7,
     logs: [[ "log_old", { id: "log_old", userId: "old_user", sessionId: null, raw: "I prefer SQLite.", ts: 1 } ]],
     atoms: [[ "atom_old", { id: "atom_old", userId: "old_user", fact: "I prefer SQLite.", category: "preference", sourceId: "log_old", importance: 0.9, accessCount: 0, ts: 1 } ]],
-    episodes: [], personas: [], policies: [],
+    episodes: [[ "episode_old", { id: "episode_old", userId: "old_user", cause: "SQLite", effect: "I prefer it", relation: "causes", sourceId: "log_old", ts: 1 } ]],
+    personas: [[ "old_user:preference", { userId: "old_user", key: "preference", value: "I prefer SQLite.", confidence: 0.92, updatedAt: 1, sourceAtomId: "atom_old" } ]],
+    policies: [[ "policy_old", { id: "policy_old", rule: "Keep tenant data isolated", domain: "security", priority: 2, createdAt: 1 } ]],
     proofs: [[ "atom_old", { atomId: "atom_old", hash: "hash", sourceLogId: "log_old", rawSnippet: "I prefer SQLite.", charStart: 0, charEnd: 16, ts: 1 } ]],
-    legacyMemories: []
+    legacyMemories: [[ "old_key", { key: "old_key", content: "legacy value", createdAt: "2026-01-01T00:00:00.000Z" } ]]
   };
   legacy.prepare("INSERT INTO infinitydb_state VALUES (1, 1, ?, CURRENT_TIMESTAMP)").run(JSON.stringify(legacyState));
   legacy.close();
   const migrated = new InfinityDB({ dbPath: legacyPath });
   assert.ok(migrated.logs.has("log_old"));
   assert.ok(migrated.atoms.has("atom_old"));
+  assert.ok(migrated.episodes.has("episode_old"));
+  assert.strictEqual(migrated.getPersona("old_user").preference, "I prefer SQLite.");
+  assert.strictEqual(migrated.recall("SQLite", { userId: "old_user" }).policies[0].rule, "Keep tenant data isolated");
+  assert.strictEqual(migrated.get("old_key").content, "legacy value");
   assert.strictEqual(migrated._seq, 7);
   migrated.add("I prefer Rust.", "old_user");
   migrated.close();
