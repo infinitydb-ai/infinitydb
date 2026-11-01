@@ -432,3 +432,55 @@ def test_embedding_cache_survives_reopen():
             assert len(hit) == 2
         finally:
             second.close()
+
+
+def test_bounded_graph_traversal_returns_explainable_shortest_paths(store):
+    seed = store.add_memory("seed", tenant_id="graph")
+    middle = store.add_memory("middle", tenant_id="graph")
+    target = store.add_memory("target", tenant_id="graph")
+    foreign = store.add_memory("foreign", tenant_id="other")
+    store.add_edge(seed, middle, "supports", tenant_id="graph", weight=0.8)
+    store.add_edge(middle, target, "causes", tenant_id="graph", weight=0.5)
+    store.add_edge(seed, foreign, "leaks", tenant_id="graph") if False else None
+
+    hits = store.traverse_graph([seed], tenant_id="graph", max_hops=2)
+    assert [(hit.memory.id, hit.depth) for hit in hits] == [(middle, 1), (target, 2)]
+    target_hit = hits[1]
+    assert target_hit.path == [seed, middle, target]
+    assert target_hit.relations == ["supports", "causes"]
+    assert target_hit.score == pytest.approx(0.4)
+
+
+def test_graph_traversal_filters_relations_and_temporal_memories(store):
+    seed = store.add_memory("graph seed", tenant_id="graph-filter")
+    included = store.add_memory("included node", tenant_id="graph-filter")
+    excluded = store.add_memory("excluded node", tenant_id="graph-filter")
+    expired = store.add_memory("expired node", tenant_id="graph-filter",
+                               valid_from=1.0, valid_to=2.0)
+    store.add_edge(seed, included, "supports", tenant_id="graph-filter")
+    store.add_edge(seed, excluded, "mentions", tenant_id="graph-filter")
+    store.add_edge(seed, expired, "supports", tenant_id="graph-filter")
+
+    hits = store.traverse_graph([seed], tenant_id="graph-filter", max_hops=1,
+                                relations=["supports"], as_of=3.0)
+    assert [hit.memory.id for hit in hits] == [included]
+
+
+def test_graph_traversal_is_tenant_scoped_and_cycle_safe(store):
+    seed = store.add_memory("tenant A seed", tenant_id="tenant-a")
+    neighbor = store.add_memory("tenant A neighbor", tenant_id="tenant-a")
+    foreign = store.add_memory("tenant B node", tenant_id="tenant-b")
+    store.add_edge(seed, neighbor, "related", tenant_id="tenant-a")
+    store.add_edge(seed, foreign, "related", tenant_id="tenant-b")
+    store.add_edge(neighbor, seed, "back", tenant_id="tenant-a")
+
+    hits = store.traverse_graph([seed], tenant_id="tenant-a", max_hops=5)
+    assert [hit.memory.id for hit in hits] == [neighbor]
+    assert all(hit.memory.tenant_id == "tenant-a" for hit in hits)
+
+
+def test_graph_traversal_validates_hops_and_empty_seeds(store):
+    with pytest.raises(ValueError, match="max_hops"):
+        store.traverse_graph(["missing"], max_hops=-1)
+    assert store.traverse_graph([], max_hops=2) == []
+    assert store.traverse_graph(["missing"], max_hops=2) == []
