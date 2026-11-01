@@ -111,6 +111,22 @@ class InfinityDB {
     if (this._storage) this._loadState();
   }
 
+  _allocateSequence() {
+    if (!this._storage) return ++this._seq;
+    const allocate = this._storage.transaction(() => {
+      const current = Number(this._storage.prepare(
+        "SELECT value FROM infinitydb_meta WHERE key='sequence'"
+      ).get()?.value || 0);
+      const next = current + 1;
+      this._storage.prepare(
+        "UPDATE infinitydb_meta SET value=? WHERE key='sequence'"
+      ).run(String(next));
+      return next;
+    });
+    this._seq = allocate();
+    return this._seq;
+  }
+
   _persist() {
     if (!this._storage) return;
     this._storage.transaction(() => {
@@ -174,7 +190,7 @@ class InfinityDB {
       throw new RangeError("importance must be between 0 and 1");
     }
     const now = Date.now() / 1000;
-    this._seq += 1;
+    this._allocateSequence();
     const logId = `L0_${this._sha256(conversation + now + this._seq).slice(0, 16)}`;
 
     // L0: Store raw
