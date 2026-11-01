@@ -49,6 +49,30 @@ const wipe = db.deleteUser("usr_sarah");
 assert.strictEqual(wipe.gdprCompliant, true);
 assert.strictEqual(db.recall("Rust", { userId: "usr_sarah" }).results.length, 0);
 
+
+// 7. Input validation and query isolation
+assert.throws(() => db.add("   "), /non-empty string/);
+assert.throws(() => db.add("valid", " "), /userId/);
+assert.throws(() => db.add("valid", "usr_sarah", null, 1.5), /between 0 and 1/);
+assert.throws(() => db.recall("Rust", { n: 0 }), /positive integer/);
+assert.deepStrictEqual(db.recall("   ", { userId: "usr_sarah" }).results, []);
+assert.strictEqual(db.recall("   ", { userId: "usr_sarah" }).tokensSaved, null);
+
+// 8. Importance is applied to stored facts
+const lowId = db.add("I prefer SQLite.", "low_importance", null, 0.1);
+const highId = db.add("I prefer SQLite.", "high_importance", null, 1.0);
+const lowAtom = Array.from(db.atoms.values()).find(a => a.sourceId === lowId);
+const highAtom = Array.from(db.atoms.values()).find(a => a.sourceId === highId);
+assert.ok(lowAtom.importance < highAtom.importance);
+
+// 9. Proof verification detects source tampering
+const proofDb = new InfinityDB();
+const proofLog = proofDb.add("I prefer Rust for safe systems.", "proof_user");
+const proofAtom = Array.from(proofDb.atoms.values()).find(a => a.sourceId === proofLog);
+assert.strictEqual(proofDb.getProof(proofAtom.id).verified, true);
+proofDb.logs.get(proofLog).raw = "tampered source";
+assert.strictEqual(proofDb.getProof(proofAtom.id).verified, false);
+
 console.log("[PASS] All JavaScript tests passed successfully!");
 
 // sdk tests
