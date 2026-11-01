@@ -284,3 +284,65 @@ def test_fts_index_rebuilds_for_existing_database(tmp_path):
     result = migrated.recall("Rust", user_id="migration-user")
     assert len(result["results"]) == 1
     migrated.conn.close()
+
+
+def test_l4_policies_are_tenant_scoped_with_global_defaults():
+    db = InfinityDB()
+    db.add_policy("Global baseline", domain="security", priority=1.0)
+    db.add_policy(
+        "Tenant A may use approved model X", domain="models", priority=3.0,
+        tenant_id="tenant_a",
+    )
+    db.add_policy(
+        "Tenant B must use approved model Y", domain="models", priority=3.0,
+        tenant_id="tenant_b",
+    )
+
+    tenant_a = db.recall("anything", user_id="tenant_a")["policies"]
+    tenant_b = db.recall("anything", user_id="tenant_b")["policies"]
+    global_only = db.recall("anything")["policies"]
+
+    assert {p["rule"] for p in tenant_a} == {
+        "Global baseline", "Tenant A may use approved model X"
+    }
+    assert {p["rule"] for p in tenant_b} == {
+        "Global baseline", "Tenant B must use approved model Y"
+    }
+    assert {p["rule"] for p in global_only} == {"Global baseline"}
+
+
+def test_l4_policy_validation_and_tenant_deletion():
+    db = InfinityDB()
+    with pytest.raises(ValueError, match="rule cannot be empty"):
+        db.add_policy(" ")
+    with pytest.raises(ValueError, match="tenant_id cannot be empty"):
+        db.add_policy("Scoped rule", tenant_id=" ")
+    with pytest.raises(ValueError, match="priority must be finite"):
+        db.add_policy("Invalid priority", priority=float("inf"))
+
+    db.add_policy("Tenant-only secret policy", tenant_id="tenant_remove")
+    db.add_policy("Shared global policy")
+    stats = db.delete_user("tenant_remove")
+
+    assert stats["l4_tenant_policies_deleted"] == 1
+    remaining = db.recall("query", user_id="tenant_remove")["policies"]
+    assert [p["rule"] for p in remaining] == ["Shared global policy"]
+
+
+def test_l4_policy_schema_migrates_legacy_global_policies(tmp_path):
+    db_path = str(tmp_path / "legacy_policy.sqlite")
+    db = InfinityDB(db_path)
+    db.add_policy("Legacy global policy", domain="security")
+    db.conn.execute("DROP INDEX IF EXISTS idx_l4_tenant_priority")
+    db.conn.execute("ALTER TABLE l4_policies DROP COLUMN tenant_id")
+    db.conn.commit()
+    db.conn.close()
+
+    migrated = InfinityDB(db_path)
+    policies = migrated.recall("query", user_id="any_tenant")["policies"]
+    assert any(p["rule"] == "Legacy global policy" for p in policies)
+    columns = {
+        row["name"] for row in migrated.conn.execute("PRAGMA table_info(l4_policies)")
+    }
+    assert "tenant_id" in columns
+    migrated.conn.close()
