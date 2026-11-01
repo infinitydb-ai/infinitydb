@@ -427,35 +427,64 @@ class InfinityDB {
       throw new TypeError("atom ids and userId must be non-empty strings");
     }
     if (oldAtomId === newAtomId) throw new Error("a fact cannot supersede itself");
-    const oldAtom = this.atoms.get(oldAtomId), newAtom = this.atoms.get(newAtomId);
-    if (!oldAtom || !newAtom) throw new Error("both facts must exist");
-    if (oldAtom.userId !== userId || newAtom.userId !== userId) {
-      throw new Error("both facts must belong to the supplied userId");
-    }
-    const byOld = new Map();
-    for (const edge of this.relations) {
-      if (!byOld.has(edge.oldAtomId)) byOld.set(edge.oldAtomId, []);
-      byOld.get(edge.oldAtomId).push(edge.newAtomId);
-    }
-    const pending = [newAtomId], visited = new Set();
-    while (pending.length) {
-      const current = pending.pop();
-      if (current === oldAtomId) throw new Error("supersession would create a cycle");
-      if (visited.has(current)) continue;
-      visited.add(current);
-      pending.push(...(byOld.get(current) || []));
-    }
-    if (this.relations.some(r => r.oldAtomId === oldAtomId && r.newAtomId === newAtomId)) {
-      throw new Error("supersession relation already exists");
-    }
-    const createdAt = Math.max(Date.now() / 1000, oldAtom.ts, newAtom.ts) + 0.001;
-    const relation = { oldAtomId, newAtomId, userId, relation: "supersedes", createdAt };
-    this.relations.push(relation);
+
+    const validateAndBuild = (oldAtom, newAtom, relations) => {
+      if (!oldAtom || !newAtom) throw new Error("both facts must exist");
+      if (oldAtom.userId !== userId || newAtom.userId !== userId) {
+        throw new Error("both facts must belong to the supplied userId");
+      }
+      const byOld = new Map();
+      for (const edge of relations) {
+        if (!byOld.has(edge.oldAtomId)) byOld.set(edge.oldAtomId, []);
+        byOld.get(edge.oldAtomId).push(edge.newAtomId);
+      }
+      const pending = [newAtomId], visited = new Set();
+      while (pending.length) {
+        const current = pending.pop();
+        if (current === oldAtomId) throw new Error("supersession would create a cycle");
+        if (visited.has(current)) continue;
+        visited.add(current);
+        pending.push(...(byOld.get(current) || []));
+      }
+      if (relations.some(r => r.oldAtomId === oldAtomId && r.newAtomId === newAtomId)) {
+        throw new Error("supersession relation already exists");
+      }
+      const createdAt = Math.max(Date.now() / 1000, oldAtom.ts, newAtom.ts) + 0.001;
+      return { oldAtomId, newAtomId, userId, relation: "supersedes", createdAt };
+    };
+
+    let relation;
     if (this._storage) {
-      this._storage.prepare("INSERT INTO l1_atom_relations (old_atom_id,new_atom_id,user_id,relation,created_at) VALUES (?,?,?,?,?)")
-        .run(oldAtomId, newAtomId, userId, "supersedes", createdAt);
+      // Acquire the write reservation before reading the graph. This makes
+      // validation and insertion one serialized SQLite operation across
+      // connections, and a failed insert cannot mutate the in-memory view.
+      const persistRelation = this._storage.transaction(() => {
+        const oldAtom = this._storage.prepare("SELECT payload FROM l1_atoms WHERE id=?").get(oldAtomId);
+        const newAtom = this._storage.prepare("SELECT payload FROM l1_atoms WHERE id=?").get(newAtomId);
+        const relations = this._storage.prepare(
+          "SELECT old_atom_id AS oldAtomId, new_atom_id AS newAtomId, user_id AS userId, relation, created_at AS createdAt FROM l1_atom_relations"
+        ).all();
+        const built = validateAndBuild(
+          oldAtom ? JSON.parse(oldAtom.payload) : null,
+          newAtom ? JSON.parse(newAtom.payload) : null,
+          relations
+        );
+        this._storage.prepare(
+          "INSERT INTO l1_atom_relations (old_atom_id,new_atom_id,user_id,relation,created_at) VALUES (?,?,?,?,?)"
+        ).run(oldAtomId, newAtomId, userId, "supersedes", built.createdAt);
+        return built;
+      }).immediate();
+      relation = persistRelation;
+    } else {
+      relation = validateAndBuild(
+        this.atoms.get(oldAtomId),
+        this.atoms.get(newAtomId),
+        this.relations
+      );
     }
-    return this._sha256(`${userId}:${oldAtomId}:${newAtomId}:${createdAt}`).slice(0, 24);
+
+    this.relations.push(relation);
+    return this._sha256(`${userId}:${oldAtomId}:${newAtomId}:${relation.createdAt}`).slice(0, 24);
   }
 
   recall(query, options = {}) {
