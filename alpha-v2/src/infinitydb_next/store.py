@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
+from .embeddings import EmbeddingProvider
 from .models import ContextPack, Memory, SearchHit
 
 _SCHEMA = """
@@ -167,6 +168,110 @@ class MemoryStore:
         with self._lock, self.db:
             self.db.executemany("INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)", prepared)
             if self._fts and fts_rows:
+                self.db.executemany("INSERT INTO memory_fts_v2 VALUES(?,?,?)", fts_rows)
+        return ids
+
+    @staticmethod
+    def _provider_identity(provider: EmbeddingProvider) -> tuple[str, str, str | None]:
+        info = provider.model_info
+        if not info.provider.strip() or not info.model.strip():
+            raise ValueError("embedding provider must expose non-empty provider and model identity")
+        return info.provider, info.model, None
+
+    def add_memory_with_embedding(
+        self, content: str, provider: EmbeddingProvider, *,
+        tenant_id: str = "default", kind: str = "fact",
+        metadata: dict[str, Any] | None = None, source_id: str | None = None,
+        raw_evidence: str | None = None, confidence: float = 1.0,
+        valid_from: float | None = None, valid_to: float | None = None,
+        memory_id: str | None = None,
+    ) -> str:
+        """Embed and persist one memory; provider I/O happens before the DB transaction."""
+        if not content or not content.strip():
+            raise ValueError("content must not be empty")
+        vectors = provider.embed([content])
+        if len(vectors) != 1:
+            raise ValueError("embedding provider must return exactly one vector")
+        vector = self._validated_vector(vectors[0])
+        provider_name, model_name, revision = self._provider_identity(provider)
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError("confidence must be between 0 and 1")
+        now = time.time()
+        mid = memory_id or str(uuid.uuid4())
+        starts = now if valid_from is None else valid_from
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        with self._lock, self.db:
+            self.db.execute(
+                "INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, tenant_id, kind, content, now, starts, valid_to,
+                 json.dumps(metadata or {}, sort_keys=True), source_id, confidence, digest),
+            )
+            if self._fts:
+                self.db.execute("INSERT INTO memory_fts_v2 VALUES(?,?,?)",
+                                (mid, self._tenant_key(tenant_id), content))
+            self.db.execute(
+                """INSERT INTO embeddings(
+                       memory_id,tenant_id,dimensions,vector_json,provider,model,model_revision
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                (mid, tenant_id, len(vector), json.dumps(vector, separators=(",", ":")),
+                 provider_name, model_name, revision),
+            )
+            if raw_evidence is not None:
+                self._append_evidence(tenant_id, mid, raw_evidence, now)
+        return mid
+
+    def add_memories_with_embeddings(
+        self, items: Iterable[dict[str, Any]], provider: EmbeddingProvider,
+    ) -> list[str]:
+        """Batch-embed first, then atomically persist all memories and vectors."""
+        batch = list(items)
+        if not batch:
+            return []
+        contents = [str(item.get("content", "")) for item in batch]
+        if any(not content.strip() for content in contents):
+            raise ValueError("content must not be empty")
+        vectors = provider.embed(contents)
+        if len(vectors) != len(batch):
+            raise ValueError("embedding provider must return exactly one vector per memory")
+        validated = [self._validated_vector(vector) for vector in vectors]
+        if len({len(vector) for vector in validated}) != 1:
+            raise ValueError("embedding provider returned inconsistent dimensions")
+        provider_name, model_name, revision = self._provider_identity(provider)
+        now = time.time()
+        memory_rows: list[tuple[Any, ...]] = []
+        embedding_rows: list[tuple[Any, ...]] = []
+        fts_rows: list[tuple[str, str, str]] = []
+        ids: list[str] = []
+        for item, content, vector in zip(batch, contents, validated):
+            confidence = float(item.get("confidence", 1.0))
+            if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                raise ValueError("confidence must be between 0 and 1")
+            tenant = str(item.get("tenant_id", "default"))
+            mid = str(item.get("memory_id") or uuid.uuid4())
+            created = float(item.get("created_at") or now)
+            starts = float(item.get("valid_from") or created)
+            digest = hashlib.sha256(content.encode()).hexdigest()
+            memory_rows.append((
+                mid, tenant, str(item.get("kind", "fact")), content, created,
+                starts, item.get("valid_to"),
+                json.dumps(item.get("metadata") or {}, sort_keys=True),
+                item.get("source_id"), confidence, digest,
+            ))
+            embedding_rows.append((
+                mid, tenant, len(vector), json.dumps(vector, separators=(",", ":")),
+                provider_name, model_name, revision,
+            ))
+            fts_rows.append((mid, self._tenant_key(tenant), content))
+            ids.append(mid)
+        with self._lock, self.db:
+            self.db.executemany("INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)", memory_rows)
+            self.db.executemany(
+                """INSERT INTO embeddings(
+                       memory_id,tenant_id,dimensions,vector_json,provider,model,model_revision
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                embedding_rows,
+            )
+            if self._fts:
                 self.db.executemany("INSERT INTO memory_fts_v2 VALUES(?,?,?)", fts_rows)
         return ids
 
