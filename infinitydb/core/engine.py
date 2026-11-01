@@ -483,7 +483,7 @@ class InfinityDB:
         """Hybrid memory recall combining BM25 keyword matching, causal links,
 
         importance weighting, and L5 Ebbinghaus time-decay scoring.
-        Delivers sub-5ms p95 recall with full cryptographic proof citations.
+        Recall latency depends on the database size, hardware, and workload.
         """
         if not isinstance(query, str):
             raise TypeError("query must be a string")
@@ -787,6 +787,7 @@ class InfinityDB:
             "l4_policies": l4_count,
             "l6_cryptographic_proofs": l6_count,
             "backend": "SQLite-WAL",
+            # This is a design target, not a measured latency guarantee.
             "p95_recall_target_ms": "<5.0",
         }
 
