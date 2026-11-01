@@ -370,3 +370,65 @@ def test_single_embedding_failure_does_not_create_memory(store):
     with pytest.raises(RuntimeError, match="offline"):
         store.add_memory_with_embedding("not persisted", provider)
     assert store.stats()["memories"] == 0
+
+
+def test_embedding_cache_reuses_vector_for_same_tenant_and_model(store):
+    provider = FakeEmbeddingProvider([[0.2, 0.8]])
+    first = store.add_memory_with_embedding("reusable fact", provider, tenant_id="cache-a")
+    second = store.add_memory_with_embedding("reusable fact", provider, tenant_id="cache-a")
+    assert first != second
+    assert provider.calls == [["reusable fact"]]
+    assert store.search_vector([0.2, 0.8], tenant_id="cache-a",
+                               provider="fake", model="test-embed")
+    assert store.db.execute("SELECT count(*) FROM embedding_cache").fetchone()[0] == 1
+
+
+def test_embedding_cache_is_tenant_isolated(store):
+    provider = FakeEmbeddingProvider([[0.2, 0.8]])
+    store.add_memory_with_embedding("private reusable fact", provider, tenant_id="tenant-a")
+    store.add_memory_with_embedding("private reusable fact", provider, tenant_id="tenant-b")
+    assert provider.calls == [["private reusable fact"], ["private reusable fact"]]
+    assert store.db.execute("SELECT count(*) FROM embedding_cache").fetchone()[0] == 2
+
+
+def test_embedding_cache_is_model_revision_and_config_scoped(store):
+    provider = FakeEmbeddingProvider([[1.0, 0.0]])
+    store.add_memory_with_embedding("versioned fact", provider, tenant_id="versions",
+                                    model_revision="r1")
+    store.add_memory_with_embedding("versioned fact", provider, tenant_id="versions",
+                                    model_revision="r2")
+    store.add_memory_with_embedding("versioned fact", provider, tenant_id="versions",
+                                    model_revision="r2", config_fingerprint="normalized-v2")
+    assert len(provider.calls) == 3
+    assert store.db.execute("SELECT count(*) FROM embedding_cache").fetchone()[0] == 3
+
+
+def test_batch_embedding_cache_deduplicates_within_tenant_but_not_across_tenants(store):
+    provider = FakeEmbeddingProvider([[1.0, 0.0], [0.0, 1.0]])
+    ids = store.add_memories_with_embeddings([
+        {"content": "duplicate batch item", "tenant_id": "same", "valid_from": 1.0},
+        {"content": "duplicate batch item", "tenant_id": "same", "valid_from": 2.0},
+        {"content": "duplicate batch item", "tenant_id": "different", "valid_from": 3.0},
+    ], provider)
+    assert len(ids) == 3
+    assert provider.calls == [["duplicate batch item", "duplicate batch item"]]
+    assert store.db.execute("SELECT count(*) FROM embedding_cache").fetchone()[0] == 2
+
+
+def test_embedding_cache_survives_reopen():
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "cache.sqlite"
+        first = MemoryStore(database)
+        provider = FakeEmbeddingProvider([[0.3, 0.7]])
+        first.add_memory_with_embedding("persist cached vector", provider, tenant_id="persist")
+        first.close()
+        second = MemoryStore(database)
+        try:
+            again = FakeEmbeddingProvider([[0.9, 0.1]])
+            second.add_memory_with_embedding("persist cached vector", again, tenant_id="persist")
+            assert again.calls == []
+            hit = second.search_vector([0.3, 0.7], tenant_id="persist",
+                                       provider="fake", model="test-embed")
+            assert len(hit) == 2
+        finally:
+            second.close()

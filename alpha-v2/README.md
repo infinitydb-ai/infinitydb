@@ -96,3 +96,18 @@ Provider failures therefore create no partial memories. Batches use one
 provider call. Model revision is caller-supplied because providers may not
 expose an immutable revision identifier. Provider-backed ingestion is
 synchronous and does not add automatic retries or background queues.
+
+
+### Persistent embedding cache
+
+Provider-backed ingestion now caches vectors by tenant, SHA-256 content hash,
+provider, model, caller-supplied model revision and preprocessing/configuration
+fingerprint. Repeated content within the same tenant and model configuration
+reuses the cached vector; identical content in another tenant is embedded
+separately. Batch ingestion deduplicates repeated cache misses before calling
+the provider. Cache rows are committed atomically with memory and embedding
+rows and survive database reopen. Use a new `model_revision` or
+`config_fingerprint` whenever model weights or text preprocessing changes.
+The cache stores hashes and vectors, not a second copy of raw content.
+Concurrent writers may both compute the same cache miss; SQLite uniqueness
+keeps one cache row, but provider calls are not single-flight coordinated.
