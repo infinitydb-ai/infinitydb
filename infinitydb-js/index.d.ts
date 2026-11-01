@@ -34,7 +34,7 @@ export class InfinityDB {
   supersedeFact(oldAtomId: string, newAtomId: string, userId: string): string;
   getProof(atomId: string): ProofResponse | null;
   getPersona(userId?: string): Record<string, string>;
-  addPolicy(rule: string, domain?: string, priority?: number): string;
+  addPolicy(rule: string, domain?: string, priority?: number, tenantId?: string | null): string;
   exportGraph(userId?: string): string;
   deleteUser(userId: string): Record<string, any>;
   stats(): Record<string, any>;

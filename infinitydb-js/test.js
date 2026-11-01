@@ -44,6 +44,18 @@ db.addPolicy("Never log plaintext passwords", "security", 2.0);
 const res2 = db.recall("login issue", { userId: "usr_sarah" });
 assert.ok(res2.policies.length >= 1);
 
+// Tenant-scoped policies are visible only to their tenant; global policies remain shared.
+const policyDb = new InfinityDB();
+policyDb.addPolicy("Global policy", "security", 1);
+policyDb.addPolicy("Tenant A only", "security", 2, "tenant_a");
+assert.deepStrictEqual(policyDb.recall("policy", { userId: "tenant_a" }).policies.map(p => p.rule), ["Tenant A only", "Global policy"]);
+assert.deepStrictEqual(policyDb.recall("policy", { userId: "tenant_b" }).policies.map(p => p.rule), ["Global policy"]);
+assert.deepStrictEqual(policyDb.recall("policy").policies.map(p => p.rule), ["Global policy"]);
+policyDb.deleteUser("tenant_a");
+assert.deepStrictEqual(policyDb.recall("policy", { userId: "tenant_a" }).policies.map(p => p.rule), ["Global policy"]);
+assert.throws(() => policyDb.addPolicy("bad", "security", 1, ""), /tenantId/);
+policyDb.close();
+
 // 6. GDPR Delete
 const wipe = db.deleteUser("usr_sarah");
 assert.ok(wipe.l0LogsDeleted >= 1);
