@@ -768,7 +768,6 @@ class InfinityDB:
             "l2_episodes_deleted": c2,
             "l3_persona_deleted": c3,
             "l4_tenant_policies_deleted": c4,
-            "gdpr_compliant": True,
         }
 
     def stats(self) -> dict[str, Any]:
