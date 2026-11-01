@@ -182,7 +182,41 @@ try {
 }
 
 
-// 12. Temporal supersession and historical recall (in-memory).
+// 12. SQLite writes are incremental: adding one memory must not rewrite old rows.
+const incrementalDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-incremental-"));
+const incrementalPath = path.join(incrementalDir, "incremental.sqlite");
+try {
+  const incremental = new InfinityDB({ dbPath: incrementalPath });
+  incremental.add("I prefer Python for analytics.", "incremental_user");
+  const audit = new schemaDb(incrementalPath);
+  audit.exec("CREATE TABLE write_audit (table_name TEXT NOT NULL)");
+  for (const table of ["l0_logs", "l1_atoms", "l2_episodes", "l3_personas", "l4_policies", "l6_proofs"]) {
+    audit.exec(`CREATE TRIGGER audit_${table}_update AFTER UPDATE ON ${table} BEGIN INSERT INTO write_audit VALUES ('${table}'); END`);
+  }
+  audit.close();
+
+  incremental.add("I prefer Rust for systems programming.", "incremental_user");
+  const verify = new schemaDb(incrementalPath);
+  // Updating a preference legitimately updates its persona row; no historical
+  // log, atom, episode, policy, or proof row should be rewritten.
+  const updatedTables = verify.prepare(
+    "SELECT table_name, count(*) AS n FROM write_audit GROUP BY table_name"
+  ).all();
+  assert.deepStrictEqual(updatedTables, [{ table_name: "l3_personas", n: 1 }]);
+  assert.strictEqual(verify.prepare("SELECT count(*) AS n FROM l0_logs").get().n, 2);
+  verify.close();
+
+  incremental.deleteUser("incremental_user");
+  incremental.close();
+  const afterIncrementalDelete = new InfinityDB({ dbPath: incrementalPath });
+  assert.strictEqual(afterIncrementalDelete.stats().l0RawLogs, 0);
+  assert.strictEqual(afterIncrementalDelete.stats().l1AtomFacts, 0);
+  afterIncrementalDelete.close();
+} finally {
+  fs.rmSync(incrementalDir, { recursive: true, force: true });
+}
+
+// 13. Temporal supersession and historical recall (in-memory).
 const temporal = new InfinityDB();
 const oldLog = temporal.add("I prefer Python for data engineering.", "temporal_user");
 const oldFact = Array.from(temporal.atoms.values()).find(a => a.sourceId === oldLog && a.category === "preference");
@@ -198,7 +232,7 @@ assert.throws(() => temporal.supersedeFact(oldFact.id, newFact.id, "other_user")
 assert.throws(() => temporal.recall("Python", { asOf: Infinity }), /finite Unix timestamp/);
 assert.strictEqual(temporal.getProof(oldFact.id).verified, true);
 
-// 13. Temporal relation survives SQLite reopen and is removed on tenant deletion.
+// 14. Temporal relation survives SQLite reopen and is removed on tenant deletion.
 const temporalDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-temporal-"));
 const temporalPath = path.join(temporalDir, "temporal.sqlite");
 const temporalSql = new InfinityDB({ dbPath: temporalPath });
