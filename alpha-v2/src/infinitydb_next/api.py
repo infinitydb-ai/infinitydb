@@ -72,7 +72,7 @@ def authenticated_tenant(x_api_key: str | None = Header(default=None, alias="X-A
     tenant: str | None = None
     # Compare every configured token to avoid returning early on a match.
     for token, tenant_id in credentials.items():
-        if isinstance(token, str) and secrets.compare_digest(token, x_api_key):
+        if isinstance(token, str) and secrets.compare_digest(token.encode("utf-8"), x_api_key.encode("utf-8")):
             if isinstance(tenant_id, str) and tenant_id.strip():
                 tenant = tenant_id
     if tenant is None:
