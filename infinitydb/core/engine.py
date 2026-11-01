@@ -408,12 +408,24 @@ class InfinityDB:
     def supersede_fact(
         self, old_atom_id: str, new_atom_id: str, user_id: str
     ) -> str:
-        """Record explicit, tenant-scoped supersession without deleting history."""
+        """Record supersession with validation and insertion in one write transaction."""
         if not all(isinstance(v, str) and v.strip() for v in
                    (old_atom_id, new_atom_id, user_id)):
             raise ValueError("atom ids and user_id must be non-empty strings")
         if old_atom_id == new_atom_id:
             raise ValueError("a fact cannot supersede itself")
+
+        # Acquire the SQLite writer reservation before validation so another
+        # connection cannot delete or reassign either fact between check and insert.
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            return self._supersede_fact_in_transaction(
+                old_atom_id, new_atom_id, user_id
+            )
+
+    def _supersede_fact_in_transaction(
+        self, old_atom_id: str, new_atom_id: str, user_id: str
+    ) -> str:
         old = self.conn.execute(
             "SELECT user_id FROM l1_atoms WHERE id = ?", (old_atom_id,)
         ).fetchone()
@@ -444,7 +456,6 @@ class InfinityDB:
                VALUES (?, ?, ?, 'supersedes', ?)""",
             (old_atom_id, new_atom_id, user_id, created_at),
         )
-        self.conn.commit()
         return self._sha256(
             f"{user_id}:{old_atom_id}:{new_atom_id}:{created_at}"
         )[:24]
@@ -702,26 +713,36 @@ class InfinityDB:
         return "\n".join(lines)
 
     def delete_user(self, user_id: str) -> dict[str, int]:
-        """GDPR / Enterprise Right-to-be-Forgotten: Cryptographically wipe all user memories across L0-L6."""
-        # Find all atom ids for user to delete proofs
-        cur = self.conn.execute("SELECT id FROM l1_atoms WHERE user_id = ?", (user_id,))
-        atom_ids = [r["id"] for r in cur.fetchall()]
+        """Atomically erase one tenant without building unbounded SQL parameter lists."""
+        with self.conn:
+            # A subquery keeps proof deletion independent of SQLite's host-parameter
+            # limit, even for tenants with very large fact histories.
+            self.conn.execute(
+                """DELETE FROM l6_proof
+                   WHERE atom_id IN (
+                       SELECT id FROM l1_atoms WHERE user_id = ?
+                   )""",
+                (user_id,),
+            )
+            self.conn.execute(
+                "DELETE FROM l1_atom_relations WHERE user_id = ?", (user_id,)
+            )
+            c1 = self.conn.execute(
+                "DELETE FROM l1_atoms WHERE user_id = ?", (user_id,)
+            ).rowcount
+            c0 = self.conn.execute(
+                "DELETE FROM l0_logs WHERE user_id = ?", (user_id,)
+            ).rowcount
+            c2 = self.conn.execute(
+                "DELETE FROM l2_episodes WHERE user_id = ?", (user_id,)
+            ).rowcount
+            c3 = self.conn.execute(
+                "DELETE FROM l3_persona WHERE user_id = ?", (user_id,)
+            ).rowcount
+            c4 = self.conn.execute(
+                "DELETE FROM l4_policies WHERE tenant_id = ?", (user_id,)
+            ).rowcount
 
-        if atom_ids:
-            placeholders = ",".join("?" for _ in atom_ids)
-            self.conn.execute(f"DELETE FROM l6_proof WHERE atom_id IN ({placeholders})", atom_ids)
-
-        self.conn.execute(
-            "DELETE FROM l1_atom_relations WHERE user_id = ?", (user_id,)
-        )
-        c1 = self.conn.execute("DELETE FROM l1_atoms WHERE user_id = ?", (user_id,)).rowcount
-        c0 = self.conn.execute("DELETE FROM l0_logs WHERE user_id = ?", (user_id,)).rowcount
-        c2 = self.conn.execute("DELETE FROM l2_episodes WHERE user_id = ?", (user_id,)).rowcount
-        c3 = self.conn.execute("DELETE FROM l3_persona WHERE user_id = ?", (user_id,)).rowcount
-        c4 = self.conn.execute(
-            "DELETE FROM l4_policies WHERE tenant_id = ?", (user_id,)
-        ).rowcount
-        self.conn.commit()
         return {
             "l0_logs_deleted": c0,
             "l1_atoms_deleted": c1,
