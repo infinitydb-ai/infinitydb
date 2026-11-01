@@ -17,6 +17,7 @@ class InfinityDB {
   constructor(options = {}) {
     this.options = options;
     this._seq = 0;
+    this._lastTimestamp = 0;
     this._storage = null;
     if (options.dbPath) {
       const Database = require("better-sqlite3");
@@ -33,6 +34,7 @@ class InfinityDB {
     this.policies = new Map();
     this.proofs = new Map();
     this.legacyMemories = new Map();
+    this.relations = [];
     this._loadState();
   }
 
@@ -42,6 +44,8 @@ class InfinityDB {
       CREATE TABLE IF NOT EXISTS l0_logs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_js_l0_user ON l0_logs(user_id);
       CREATE TABLE IF NOT EXISTS l1_atoms (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_id TEXT NOT NULL, fact TEXT NOT NULL, ts REAL NOT NULL, payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS l1_atom_relations (old_atom_id TEXT NOT NULL, new_atom_id TEXT NOT NULL, user_id TEXT NOT NULL, relation TEXT NOT NULL CHECK(relation='supersedes'), created_at REAL NOT NULL, PRIMARY KEY(old_atom_id,new_atom_id), CHECK(old_atom_id <> new_atom_id));
+      CREATE INDEX IF NOT EXISTS idx_js_atom_relations_user_time ON l1_atom_relations(user_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_js_l1_user_ts ON l1_atoms(user_id, ts);
       CREATE INDEX IF NOT EXISTS idx_js_l1_source ON l1_atoms(source_id);
       CREATE TABLE IF NOT EXISTS l2_episodes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_id TEXT NOT NULL, payload TEXT NOT NULL);
@@ -105,6 +109,10 @@ class InfinityDB {
     this.policies = new Map(get("SELECT id, payload FROM l4_policies", "id"));
     this.proofs = new Map(get("SELECT atom_id AS id, payload FROM l6_proofs", "id"));
     this.legacyMemories = new Map(get("SELECT memory_key AS id, payload FROM legacy_memories", "id"));
+    this.relations = this._storage.prepare("SELECT old_atom_id AS oldAtomId, new_atom_id AS newAtomId, user_id AS userId, relation, created_at AS createdAt FROM l1_atom_relations").all();
+    for (const atom of this.atoms.values()) {
+      if (atom.ts > this._lastTimestamp) this._lastTimestamp = atom.ts;
+    }
   }
 
   _refreshState() {
@@ -137,6 +145,8 @@ class InfinityDB {
       this._writeEntries("l4_policies", "id", Array.from(this.policies.values()), v => [v.id, JSON.stringify(v)]);
       this._writeEntries("l6_proofs", "atom_id", Array.from(this.proofs.values()), v => [v.atomId, v.sourceLogId, JSON.stringify(v)]);
       this._writeEntries("legacy_memories", "memory_key", Array.from(this.legacyMemories.entries()), v => [v[0], JSON.stringify(v[1])]);
+      const relationInsert = this._storage.prepare("INSERT OR IGNORE INTO l1_atom_relations (old_atom_id,new_atom_id,user_id,relation,created_at) VALUES (?,?,?,?,?)");
+      for (const relation of this.relations) relationInsert.run(relation.oldAtomId, relation.newAtomId, relation.userId, relation.relation, relation.createdAt);
     })();
   }
 
@@ -188,7 +198,8 @@ class InfinityDB {
     if (importance < 0 || importance > 1) {
       throw new RangeError("importance must be between 0 and 1");
     }
-    const now = Date.now() / 1000;
+    const now = Math.max(Date.now() / 1000, this._lastTimestamp + 0.001);
+    this._lastTimestamp = now;
     this._allocateSequence();
     const logId = `L0_${this._sha256(conversation + now + this._seq).slice(0, 16)}`;
 
@@ -310,6 +321,43 @@ class InfinityDB {
     return logId;
   }
 
+  supersedeFact(oldAtomId, newAtomId, userId) {
+    this._refreshState();
+    if (![oldAtomId, newAtomId, userId].every(v => typeof v === "string" && v.trim())) {
+      throw new TypeError("atom ids and userId must be non-empty strings");
+    }
+    if (oldAtomId === newAtomId) throw new Error("a fact cannot supersede itself");
+    const oldAtom = this.atoms.get(oldAtomId), newAtom = this.atoms.get(newAtomId);
+    if (!oldAtom || !newAtom) throw new Error("both facts must exist");
+    if (oldAtom.userId !== userId || newAtom.userId !== userId) {
+      throw new Error("both facts must belong to the supplied userId");
+    }
+    const byOld = new Map();
+    for (const edge of this.relations) {
+      if (!byOld.has(edge.oldAtomId)) byOld.set(edge.oldAtomId, []);
+      byOld.get(edge.oldAtomId).push(edge.newAtomId);
+    }
+    const pending = [newAtomId], visited = new Set();
+    while (pending.length) {
+      const current = pending.pop();
+      if (current === oldAtomId) throw new Error("supersession would create a cycle");
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...(byOld.get(current) || []));
+    }
+    if (this.relations.some(r => r.oldAtomId === oldAtomId && r.newAtomId === newAtomId)) {
+      throw new Error("supersession relation already exists");
+    }
+    const createdAt = Math.max(Date.now() / 1000, oldAtom.ts, newAtom.ts) + 0.001;
+    const relation = { oldAtomId, newAtomId, userId, relation: "supersedes", createdAt };
+    this.relations.push(relation);
+    if (this._storage) {
+      this._storage.prepare("INSERT INTO l1_atom_relations (old_atom_id,new_atom_id,user_id,relation,created_at) VALUES (?,?,?,?,?)")
+        .run(oldAtomId, newAtomId, userId, "supersedes", createdAt);
+    }
+    return this._sha256(`${userId}:${oldAtomId}:${newAtomId}:${createdAt}`).slice(0, 24);
+  }
+
   recall(query, options = {}) {
     this._refreshState();
     if (typeof query !== "string") throw new TypeError("query must be a string");
@@ -321,9 +369,13 @@ class InfinityDB {
         (typeof options.userId !== "string" || !options.userId.trim())) {
       throw new TypeError("userId must be a non-empty string");
     }
+    if (options.asOf !== undefined && (typeof options.asOf !== "number" || !Number.isFinite(options.asOf))) {
+      throw new TypeError("asOf must be a finite Unix timestamp");
+    }
     const start = performance.now();
     const userId = options.userId || null;
     const now = Date.now() / 1000;
+    const asOf = options.asOf;
     const qTerms = (query.toLowerCase().match(/\w+/g) || []).filter(t => t.length > 1);
 
     const scored = [];
@@ -339,6 +391,8 @@ class InfinityDB {
     }
     for (const [id, atom] of this.atoms.entries()) {
       if (userId && atom.userId !== userId) continue;
+      if (asOf !== undefined && atom.ts > asOf) continue;
+      if (this.relations.some(r => r.oldAtomId === id && (asOf === undefined || r.createdAt <= asOf))) continue;
       const factLower = atom.fact.toLowerCase();
       let termMatches = 0;
       for (const term of qTerms) {
@@ -474,6 +528,7 @@ class InfinityDB {
     for (const [id, log] of Array.from(this.logs.entries())) {
       if (log.userId === userId) { this.logs.delete(id); c0++; }
     }
+    this.relations = this.relations.filter(r => r.userId !== userId);
     for (const [id, atom] of Array.from(this.atoms.entries())) {
       if (atom.userId === userId) {
         this.atoms.delete(id);
@@ -490,6 +545,7 @@ class InfinityDB {
     if (this._storage) {
       this._storage.transaction(() => {
         this._storage.prepare("DELETE FROM l0_logs WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l1_atom_relations WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l1_atoms WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l2_episodes WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l3_personas WHERE user_id=?").run(userId);
