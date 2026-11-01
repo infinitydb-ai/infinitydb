@@ -253,9 +253,29 @@ class InfinityDB {
     if (!key || !key.trim()) throw new Error("key cannot be empty");
     if (!content || !content.trim()) throw new Error("content cannot be empty");
     const mem = { key, content, createdAt: new Date().toISOString() };
-    this.add(`Memory key ${key}: ${content}`, "legacy");
-    this.legacyMemories.set(key, mem);
-    this._persist();
+    const previousState = {
+      logs: new Map(this.logs),
+      atoms: new Map(this.atoms),
+      episodes: new Map(this.episodes),
+      personas: new Map(this.personas),
+      proofs: new Map(this.proofs),
+      legacyMemories: new Map(this.legacyMemories),
+      lastTimestamp: this._lastTimestamp,
+    };
+    try {
+      this._add(`Memory key ${key}: ${content}`, "legacy", null, 0.9, false);
+      this.legacyMemories.set(key, mem);
+      this._persist();
+    } catch (error) {
+      this.logs = previousState.logs;
+      this.atoms = previousState.atoms;
+      this.episodes = previousState.episodes;
+      this.personas = previousState.personas;
+      this.proofs = previousState.proofs;
+      this.legacyMemories = previousState.legacyMemories;
+      this._lastTimestamp = previousState.lastTimestamp;
+      throw error;
+    }
     return mem;
   }
 
@@ -280,6 +300,10 @@ class InfinityDB {
 
   // Core L0-L6 API
   add(conversation, userId = "default", sessionId = null, importance = 0.9) {
+    return this._add(conversation, userId, sessionId, importance, true);
+  }
+
+  _add(conversation, userId, sessionId, importance, persist = true) {
     this._refreshState();
     if (typeof conversation !== "string" || !conversation.trim()) {
       throw new TypeError("conversation must be a non-empty string");
@@ -433,7 +457,7 @@ class InfinityDB {
     }
 
     try {
-      this._persist();
+      if (persist) this._persist();
     } catch (error) {
       this.logs = previousState.logs;
       this.atoms = previousState.atoms;
