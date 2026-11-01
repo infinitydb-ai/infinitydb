@@ -62,3 +62,36 @@ def test_batch_ingestion_and_kind_filter(store):
     hits = store.search("Rust retrieval", tenant_id="batch", kinds=["fact"])
     assert hits and hits[0].memory.id == ids[0]
     assert all(hit.memory.kind == "fact" for hit in hits)
+
+
+def test_edges_require_both_endpoints_in_same_tenant(store):
+    source = store.add_memory("source fact", tenant_id="tenant-a")
+    destination = store.add_memory("destination fact", tenant_id="tenant-a")
+    foreign = store.add_memory("foreign fact", tenant_id="tenant-b")
+
+    store.add_edge(source, destination, "supports", tenant_id="tenant-a", weight=0.5)
+    assert store.stats(tenant_id="tenant-a")["edges"] == 1
+
+    with pytest.raises(ValueError, match="both edge endpoints"):
+        store.add_edge(source, foreign, "leaks", tenant_id="tenant-a")
+    with pytest.raises(ValueError, match="both edge endpoints"):
+        store.add_edge(source, "missing-id", "dangling", tenant_id="tenant-a")
+    assert store.stats(tenant_id="tenant-a")["edges"] == 1
+    assert store.stats(tenant_id="tenant-b")["edges"] == 0
+
+
+@pytest.mark.parametrize("weight", [-0.1, float("inf"), float("-inf"), float("nan")])
+def test_edges_reject_invalid_weights(store, weight):
+    source = store.add_memory("source")
+    destination = store.add_memory("destination")
+    with pytest.raises(ValueError, match="finite non-negative"):
+        store.add_edge(source, destination, "related", weight=weight)
+    assert store.stats()["edges"] == 0
+
+
+def test_edges_reject_empty_relation(store):
+    source = store.add_memory("source")
+    destination = store.add_memory("destination")
+    with pytest.raises(ValueError, match="relation must not be empty"):
+        store.add_edge(source, destination, " ")
+    assert store.stats()["edges"] == 0
