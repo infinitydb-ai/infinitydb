@@ -1,5 +1,5 @@
 {
-  "description": "Shared expected behavior for tenant-scoped policies, tenant-isolated facts and deletion, temporal supersession, and cryptographic provenance across SDKs.",
+  "description": "Shared expected behavior for input validation, tenant-scoped policies and data, temporal supersession, and cryptographic provenance across SDKs.",
   "global_policy": {
     "rule": "Global security baseline",
     "domain": "security",
@@ -49,5 +49,12 @@
     "query": "deployment marker",
     "expected_a": "tenant alpha",
     "expected_b": "tenant beta"
+  },
+  "validation": {
+    "valid_user": "shared_validation_user",
+    "whitespace_conversation": "   ",
+    "valid_conversation": "A deployment uses immutable build artifacts.",
+    "invalid_importance": 1.1,
+    "empty_query": "   "
   }
 }

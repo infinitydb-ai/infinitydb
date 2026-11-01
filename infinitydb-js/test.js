@@ -352,3 +352,19 @@ const sharedTenantRemaining = sharedTenantDb.recall(sharedTenantData.query, { us
 assert.strictEqual(sharedTenantRemaining.length, 1);
 assert.ok(sharedTenantRemaining[0].fact.includes(sharedTenantData.expected_b));
 sharedTenantDb.close();
+
+
+// Shared input validation fixture: reject invalid writes and keep empty-query recall non-broad.
+const sharedValidation = policyFixture.validation;
+const sharedValidationDb = new InfinityDB();
+assert.throws(() => sharedValidationDb.add(sharedValidation.whitespace_conversation, sharedValidation.valid_user));
+assert.throws(() => sharedValidationDb.add(
+  sharedValidation.valid_conversation,
+  sharedValidation.valid_user,
+  null,
+  sharedValidation.invalid_importance
+));
+const sharedEmptyRecall = sharedValidationDb.recall(sharedValidation.empty_query, { userId: sharedValidation.valid_user });
+assert.deepStrictEqual(sharedEmptyRecall.results, []);
+assert.strictEqual(sharedEmptyRecall.tokensSaved, null);
+sharedValidationDb.close();
