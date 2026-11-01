@@ -34,7 +34,7 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 
 *   **Token-Aware Memory:** Stores raw multi-turn conversations and tool transcripts outside the model context. Actual token savings depend on the caller tokenizer and prompt construction.
 *   **Zero-LLM Fact Extraction:** L1 Atomic Facts are parsed with high-speed deterministic rules in under 10ms with zero token cost.
-*   **Dynamic Persona & Conflict Auto-Resolution:** When preferences evolve, InfinityDB auto-resolves conflicts by timestamp provenance instead of accumulating contradictory vectors.
+*   **Temporal Fact History:** Facts remain in their original provenance chain. Applications can explicitly mark a newer fact as superseding an older one and query memory as of a Unix timestamp; the engine does not guess semantic contradictions.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
 *   **Tenant-Scoped Guardrails (L4 Policies):** Combines global baseline policies with tenant-specific SOPs; a tenant's private policies are excluded from other tenants' recall.
 *   **Indexed Hybrid Retrieval:** SQLite FTS5 narrows keyword candidates; importance weighting and Ebbinghaus time-decay rank the retrieved facts. Latency depends on dataset, hardware, and workload.
@@ -125,11 +125,14 @@ print("Latency:", context["latency_ms"], "ms")
 print("Top Fact:", context["results"][0]["fact"])
 print("Causal Link:", context["causal_graph"])
 
-# 3. Dynamic Persona with Conflict Auto-Resolution
-print("Persona Profile:", db.get_persona("sarah_c"))
-
-db.add("I switched to Go for high-concurrency microservices.", user_id="sarah_c")
-print("Updated Persona:", db.get_persona("sarah_c")["preference"])
+# 3. Temporal facts: preserve history and explicitly supersede
+old_fact = context["results"][0]["id"]
+new_log = db.add("I switched to Go for high-concurrency microservices.", user_id="sarah_c")
+new_fact = db.conn.execute(
+    "SELECT id FROM l1_atoms WHERE source_id = ?", (new_log,)
+).fetchone()["id"]
+db.supersede_fact(old_fact, new_fact, user_id="sarah_c")
+# Current recall returns the new fact; as_of=<unix timestamp> can inspect history.
 
 # 4. L6 Cryptographic Proof Verification
 atom_id = context["results"][0]["id"]
