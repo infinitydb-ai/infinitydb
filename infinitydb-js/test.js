@@ -95,9 +95,7 @@ assert.strictEqual(proofDb.getProof(proofAtom.id).verified, false);
 
 
  // 10. SQLite durability across process-style reopen
-const fs = require("fs");
 const os = require("os");
-const path = require("path");
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-sqlite-"));
 const dbPath = path.join(tempDir, "memory.sqlite");
 try {
