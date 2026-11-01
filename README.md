@@ -33,7 +33,7 @@
 Most memory systems compress history into an opaque vector pile. When recall fails, you are left guessing. InfinityDB builds a structured, verifiable semantic pyramid.
 
 *   **Token-Aware Memory:** Stores raw multi-turn conversations and tool transcripts outside the model context. Actual token savings depend on the caller tokenizer and prompt construction.
-*   **Zero-LLM Fact Extraction:** L1 Atomic Facts are parsed with high-speed deterministic rules in under 10ms with zero token cost.
+*   **Deterministic Fact Extraction:** L1 Atomic Facts are extracted with local rules and no LLM call. Extraction quality is limited to the implemented patterns; latency depends on workload and hardware.
 *   **Temporal Fact History:** Facts remain in their original provenance chain. Applications can explicitly mark a newer fact as superseding an older one and query memory as of a Unix timestamp; the engine does not guess semantic contradictions.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
 *   **Tenant-Scoped Guardrails (L4 Policies):** Combines global baseline policies with tenant-specific SOPs; a tenant's private policies are excluded from other tenants' recall.
@@ -63,7 +63,7 @@ L5 FORGETTING     -> Ebbinghaus forgetting curve decay with reinforcement
 L6 PROOF CHAIN    -> Cryptographic SHA-256 provenance linking every atom back to exact L0 raw text
 ```
 
-No lossy compression. Every layer is readable and inspectable.
+The stored raw logs and extracted records are inspectable; extraction is rule-based and does not guarantee lossless semantic coverage.
 
 ---
 
@@ -99,7 +99,7 @@ mem = AgentMemory("agent_memory.db")
 # Store conversation: auto-extracts atomic facts with zero LLM API cost ($0)
 mem.add("User hates long answers and loves python. Project code is ABC123", user_id="sarah_c")
 
-# Recall in <1ms
+# Recall latency depends on workload and hardware
 facts = mem.search("project code?", user_id="sarah_c", limit=3)
 print(facts)
 # -> ["Project code is ABC123", "User prefers concise answers", "User loves python"]
@@ -119,7 +119,7 @@ log_id = db.add(
     user_id="sarah_c"
 )
 
-# 2. Sub-5ms Hybrid Recall
+# 2. Indexed keyword retrieval with importance and time-decay scoring
 context = db.recall("what language does Sarah prefer?", user_id="sarah_c")
 print("Latency:", context["latency_ms"], "ms")
 print("Top Fact:", context["results"][0]["fact"])
@@ -188,10 +188,11 @@ Open `http://localhost:8080` to inspect:
 
 ```bash
 pytest
-python benchmarks/run_benchmark.py
-python benchmarks/stress_test_2000.py
+python benchmarks/reproducible.py --iterations 1000 --output benchmark-results.json
 node infinitydb-js/test.js
 ```
+
+The legacy `benchmarks/benchmark.py` and `benchmarks/run_benchmark.py` commands now route to the same single-engine harness. They no longer produce synthetic competitor rankings. See [benchmark methodology](benchmarks/REPRODUCIBLE_BENCHMARK.md).
 
 ---
 
@@ -235,7 +236,7 @@ context = memory.get(input_text="What are user requirements?")
 See `examples/llamaindex_integration.py`.
 
 ### Vercel AI SDK
-Middleware for Node.js / Next.js AI applications that enriches prompt context with sub-millisecond local memories.
+Middleware for Node.js / Next.js AI applications that enriches prompt context with local memory retrieval.
 ```javascript
 const { InfinityDBVercelMemory } = require("./examples/vercel_ai_integration");
 
@@ -285,7 +286,7 @@ fly launch
 
 REST endpoints exposed:
 * `POST /add` - Ingest dialogue turns and extract atomic facts
-* `POST /search` - Sub-millisecond hybrid memory recall
+* `POST /search` - Hybrid memory recall
 * `POST /recall` - Full L0-L6 recall with causal graph and policies
 * `GET /health` - Liveness check on SQLite WAL
 * `GET /stats` - Memory layer statistics
