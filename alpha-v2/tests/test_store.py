@@ -227,3 +227,76 @@ def test_hybrid_search_validates_fusion_parameters(store):
         store.search_hybrid("query", [1.0, 0.0], rrf_k=0)
     with pytest.raises(ValueError, match="candidate_limit"):
         store.search_hybrid("query", [1.0, 0.0], limit=5, candidate_limit=2)
+
+
+def test_embedding_metadata_filters_incompatible_model_spaces(store):
+    first = store.add_memory("first model vector", tenant_id="models")
+    second = store.add_memory("second model vector", tenant_id="models")
+    store.set_embedding(
+        first, [1.0, 0.0], tenant_id="models",
+        provider="ollama", model="nomic-embed-text", model_revision="v1",
+    )
+    store.set_embedding(
+        second, [0.0, 1.0], tenant_id="models",
+        provider="ollama", model="mxbai-embed-large", model_revision="v2",
+    )
+
+    hits = store.search_vector(
+        [1.0, 0.0], tenant_id="models",
+        provider="ollama", model="nomic-embed-text", model_revision="v1",
+    )
+    assert [hit.memory.id for hit in hits] == [first]
+    assert store.search_vector(
+        [1.0, 0.0], tenant_id="models", provider="ollama",
+        model="missing-model",
+    ) == []
+
+
+def test_embedding_revision_filter_requires_provider_and_model(store):
+    with pytest.raises(ValueError, match="provider and model"):
+        store.search_vector([1.0, 0.0], model_revision="v1")
+
+
+def test_embedding_metadata_migration_is_additive_and_idempotent():
+    import sqlite3
+
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "legacy.sqlite"
+        connection = sqlite3.connect(database)
+        connection.executescript("""
+            CREATE TABLE memories (
+                id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, kind TEXT NOT NULL,
+                content TEXT NOT NULL, created_at REAL NOT NULL, valid_from REAL NOT NULL,
+                valid_to REAL, metadata_json TEXT NOT NULL, source_id TEXT,
+                confidence REAL NOT NULL, content_hash TEXT NOT NULL
+            );
+            CREATE TABLE embeddings (
+                memory_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+                dimensions INTEGER NOT NULL, vector_json TEXT NOT NULL
+            );
+            INSERT INTO memories VALUES(
+                'legacy-id','legacy','fact','legacy vector',1,1,NULL,'{}',NULL,1,'hash'
+            );
+            INSERT INTO embeddings VALUES('legacy-id','legacy',2,'[1.0,0.0]');
+        """)
+        connection.commit()
+        connection.close()
+
+        first = MemoryStore(database)
+        try:
+            columns = {row["name"] for row in first.db.execute("PRAGMA table_info(embeddings)")}
+            assert {"provider", "model", "model_revision"} <= columns
+            metadata = first.db.execute(
+                "SELECT provider,model,model_revision FROM embeddings WHERE memory_id='legacy-id'"
+            ).fetchone()
+            assert tuple(metadata) == ("unknown", "unknown", None)
+        finally:
+            first.close()
+
+        second = MemoryStore(database)
+        try:
+            columns = [row["name"] for row in second.db.execute("PRAGMA table_info(embeddings)")]
+            assert columns.count("provider") == 1
+            assert second.search_vector([1.0, 0.0], tenant_id="legacy")
+        finally:
+            second.close()
