@@ -123,6 +123,7 @@ class InfinityDB {
 
   _loadState() {
     if (!this._storage) return;
+    const loadSnapshot = () => {
     const get = (sql, key) => this._storage.prepare(sql).all().map(row => [row[key], JSON.parse(row.payload)]);
     this._seq = Number(this._storage.prepare("SELECT value FROM infinitydb_meta WHERE key='sequence'").get()?.value || 0);
     this.logs = new Map(get("SELECT id, payload FROM l0_logs", "id"));
@@ -146,6 +147,8 @@ class InfinityDB {
     for (const atom of this.atoms.values()) {
       if (atom.ts > this._lastTimestamp) this._lastTimestamp = atom.ts;
     }
+    };
+    this._storage.transaction(loadSnapshot)();
   }
 
   _refreshState() {
