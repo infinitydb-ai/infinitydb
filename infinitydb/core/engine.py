@@ -143,8 +143,6 @@ class InfinityDB:
                 tenant_id TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_l4_domain ON l4_policies(domain);
-            CREATE INDEX IF NOT EXISTS idx_l4_tenant_priority
-                ON l4_policies(tenant_id, priority DESC);
 
             -- L6: Cryptographic Proof Chain linking atoms to raw logs
             CREATE TABLE IF NOT EXISTS l6_proof (
