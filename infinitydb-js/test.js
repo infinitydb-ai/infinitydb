@@ -104,10 +104,8 @@ try {
   assert.strictEqual(afterDelete.stats().l0RawLogs, 0);
   afterDelete.close();
 } finally {
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  // Shared temporary directory is removed after the migration tests below.
 }
-
-console.log("[PASS] All JavaScript tests passed successfully!");
 
 // sdk tests
 
@@ -161,5 +159,7 @@ try {
   assert.strictEqual(migratedRaw.prepare("SELECT count(*) AS n FROM l0_logs").get().n, 2);
   migratedRaw.close();
 } finally {
-  // Parent test cleanup runs after all database handles are closed.
+  fs.rmSync(tempDir, { recursive: true, force: true });
 }
+
+console.log("[PASS] All JavaScript tests passed successfully!");
