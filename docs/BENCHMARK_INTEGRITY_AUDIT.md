@@ -29,3 +29,10 @@ This audit inspected the default-branch README, benchmark implementation, commit
 - Add a test that tampers with the original source and expects verification to fail.
 
 This document is an engineering audit, not a certification or independent third-party evaluation.
+
+
+## Public-claims remediation (v1.1)
+
+The README and benchmark guide are being aligned with the committed artifacts. Historical cross-vendor score tables and unsupported latency/token-saving guarantees are removed from the headline presentation. The local harness is explicitly described as a regression tool with architecture emulators, not an independent product shootout.
+
+A future benchmark release must include pinned real implementations, dataset revisions, environment metadata, per-example outputs, and repeatable scoring before publishing comparative rankings.
