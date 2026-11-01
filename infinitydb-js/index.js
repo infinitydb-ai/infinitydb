@@ -110,9 +110,9 @@ class InfinityDB {
     this.proofs = new Map(get("SELECT atom_id AS id, payload FROM l6_proofs", "id"));
     this.legacyMemories = new Map(get("SELECT memory_key AS id, payload FROM legacy_memories", "id"));
     this.relations = this._storage.prepare("SELECT old_atom_id AS oldAtomId, new_atom_id AS newAtomId, user_id AS userId, relation, created_at AS createdAt FROM l1_atom_relations").all();
-    this._lastTimestamp = this.atoms.size
-      ? Math.max(this._lastTimestamp, ...Array.from(this.atoms.values(), atom => atom.ts))
-      : this._lastTimestamp;
+    for (const atom of this.atoms.values()) {
+      if (atom.ts > this._lastTimestamp) this._lastTimestamp = atom.ts;
+    }
   }
 
   _refreshState() {
