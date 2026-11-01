@@ -16,7 +16,8 @@ def test_agent_memory_basic_lifecycle():
     assert stats["l0_raw_logs"] >= 1
     assert stats["l1_atom_facts"] >= 1
 
-    # GDPR wipe
+    # Tenant data removal
     deleted = mem.delete("user_123")
-    assert deleted["gdpr_compliant"] is True
+    assert deleted["l0_logs_deleted"] >= 1
+    assert deleted["l1_atoms_deleted"] >= 1
     assert mem.search("project code?", user_id="user_123") == []
