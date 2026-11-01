@@ -333,3 +333,22 @@ assert.strictEqual(sharedProofDb.getProof(sharedProofAtom.id).verified, true);
 sharedProofDb.logs.get(sharedProofLog).raw = sharedProof.tampered_source;
 assert.strictEqual(sharedProofDb.getProof(sharedProofAtom.id).verified, false);
 sharedProofDb.close();
+
+
+// Shared tenant data fixture: facts stay isolated and deleting one tenant preserves the other.
+const sharedTenantData = policyFixture.tenant_data;
+const sharedTenantDb = new InfinityDB();
+sharedTenantDb.add(sharedTenantData.fact_a, sharedTenantData.tenant_a);
+sharedTenantDb.add(sharedTenantData.fact_b, sharedTenantData.tenant_b);
+const sharedTenantA = sharedTenantDb.recall(sharedTenantData.query, { userId: sharedTenantData.tenant_a }).results;
+const sharedTenantB = sharedTenantDb.recall(sharedTenantData.query, { userId: sharedTenantData.tenant_b }).results;
+assert.strictEqual(sharedTenantA.length, 1);
+assert.ok(sharedTenantA[0].fact.includes(sharedTenantData.expected_a));
+assert.strictEqual(sharedTenantB.length, 1);
+assert.ok(sharedTenantB[0].fact.includes(sharedTenantData.expected_b));
+sharedTenantDb.deleteUser(sharedTenantData.tenant_a);
+assert.deepStrictEqual(sharedTenantDb.recall(sharedTenantData.query, { userId: sharedTenantData.tenant_a }).results, []);
+const sharedTenantRemaining = sharedTenantDb.recall(sharedTenantData.query, { userId: sharedTenantData.tenant_b }).results;
+assert.strictEqual(sharedTenantRemaining.length, 1);
+assert.ok(sharedTenantRemaining[0].fact.includes(sharedTenantData.expected_b));
+sharedTenantDb.close();
