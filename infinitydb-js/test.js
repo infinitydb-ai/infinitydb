@@ -210,7 +210,7 @@ try {
   incremental.close();
   const afterIncrementalDelete = new InfinityDB({ dbPath: incrementalPath });
   assert.strictEqual(afterIncrementalDelete.stats().l0RawLogs, 0);
-  assert.strictEqual(afterIncrementalDelete.stats().l1AtomicFacts, 0);
+  assert.strictEqual(afterIncrementalDelete.stats().l1AtomFacts, 0);
   afterIncrementalDelete.close();
 } finally {
   fs.rmSync(incrementalDir, { recursive: true, force: true });
