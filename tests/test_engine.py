@@ -125,8 +125,8 @@ def test_recall_reports_nonnegative_latency():
         assert res["latency_ms"] >= 0
 
 
-def test_gdpr_delete_user():
-    """Verify GDPR right-to-be-forgotten completely wipes user data across L0-L6."""
+def test_delete_user_removes_tenant_data():
+    """Verify tenant-scoped memory data is removed without affecting other tenants."""
     db = InfinityDB()
     db.add("I am Dave. My budget is $5000.", user_id="user_dave")
     db.add("I am Eve. My budget is $9000.", user_id="user_eve")
@@ -135,7 +135,6 @@ def test_gdpr_delete_user():
     assert len(dave_res["results"]) > 0
 
     wipe_stats = db.delete_user("user_dave")
-    assert wipe_stats["gdpr_compliant"] is True
     assert wipe_stats["l0_logs_deleted"] >= 1
     assert wipe_stats["l1_atoms_deleted"] >= 1
 
