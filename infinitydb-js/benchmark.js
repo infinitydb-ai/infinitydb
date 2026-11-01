@@ -161,7 +161,7 @@ function run(iterations, output = null, quiet = false) {
 
   const rendered = JSON.stringify(result, null, 2);
   if (output) fs.writeFileSync(output, rendered + "\n", "utf8");
-  process.stdout.write(rendered + "\n");
+  if (!quiet) process.stdout.write(rendered + "\n");
   return result;
 }
 
