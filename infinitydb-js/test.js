@@ -259,6 +259,23 @@ const temporalOld = Array.from(temporalSql.atoms.values()).find(a => a.sourceId 
 const temporalCutoff = temporalOld.ts + 0.001;
 const temporalNewLog = temporalSql.add("I prefer Go for backend services.", "temporal_sql_user");
 const temporalNew = Array.from(temporalSql.atoms.values()).find(a => a.sourceId === temporalNewLog);
+temporalSql._storage.exec(`
+  CREATE TRIGGER reject_temporal_relation_insert
+  BEFORE INSERT ON l1_atom_relations
+  BEGIN
+    SELECT RAISE(ABORT, 'simulated supersession write failure');
+  END;
+`);
+assert.throws(
+  () => temporalSql.supersedeFact(temporalOld.id, temporalNew.id, "temporal_sql_user"),
+  /simulated supersession write failure/
+);
+assert.strictEqual(temporalSql.relations.length, 0);
+assert.strictEqual(
+  temporalSql._storage.prepare("SELECT count(*) AS count FROM l1_atom_relations").get().count,
+  0
+);
+temporalSql._storage.exec("DROP TRIGGER reject_temporal_relation_insert");
 temporalSql.supersedeFact(temporalOld.id, temporalNew.id, "temporal_sql_user");
 temporalSql.close();
 const temporalReopened = new InfinityDB({ dbPath: temporalPath });
