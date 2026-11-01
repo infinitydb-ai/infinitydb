@@ -32,12 +32,12 @@
 
 Most memory systems compress history into an opaque vector pile. When recall fails, you are left guessing. InfinityDB builds a structured, verifiable semantic pyramid.
 
-*   **Token Compression:** Offloads raw multi-turn conversations and tool transcripts into disk-backed L0 storage, eliminating up to 81.4% of context token overhead.
+*   **Token-Aware Memory:** Stores raw multi-turn conversations and tool transcripts outside the model context. Actual token savings depend on the caller tokenizer and prompt construction.
 *   **Zero-LLM Fact Extraction:** L1 Atomic Facts are parsed with high-speed deterministic rules in under 10ms with zero token cost.
 *   **Dynamic Persona & Conflict Auto-Resolution:** When preferences evolve, InfinityDB auto-resolves conflicts by timestamp provenance instead of accumulating contradictory vectors.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
 *   **Enterprise Guardrails (L4 Policies):** Injects corporate SOPs, regulatory constraints, and security guardrails directly into recall context.
-*   **Sub-5ms Hybrid Retrieval:** BM25 token matching combined with importance weighting and Ebbinghaus time-decay scoring.
+*   **Indexed Hybrid Retrieval:** SQLite FTS5 narrows keyword candidates; importance weighting and Ebbinghaus time-decay rank the retrieved facts. Latency depends on dataset, hardware, and workload.
 
 ---
 
@@ -55,7 +55,7 @@ Instead of an opaque vector pile, InfinityDB constructs a neurosymbolic hierarch
 
 ```
 L0 RAW LOGS       -> Verbatim conversation & tool logs stored on disk/SQLite (offloaded from context)
-L1 ATOM FACTS     -> Extracted atomic facts (names, roles, preferences, budgets, constraints) [<10ms]
+L1 ATOM FACTS     -> Extracted atomic facts with SQLite FTS5 keyword index
 L2 EPISODE GRAPH  -> Causal & temporal relationships ("X happened because Y") with Mermaid export
 L3 PERSONA DNA    -> Dynamic user identity profile with automated conflict resolution
 L4 POLICY ENGINE  -> Enterprise compliance rules, security policies, and tool SOPs
