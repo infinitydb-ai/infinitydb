@@ -135,27 +135,32 @@ class InfinityDB {
 
   // Legacy key-value compatibility
   put(key, content) {
+    this._refreshState();
     if (!key || !key.trim()) throw new Error("key cannot be empty");
     if (!content || !content.trim()) throw new Error("content cannot be empty");
     const mem = { key, content, createdAt: new Date().toISOString() };
-    this.legacyMemories.set(key, mem);
     this.add(`Memory key ${key}: ${content}`, "legacy");
+    this.legacyMemories.set(key, mem);
     this._persist();
     return mem;
   }
 
   get(key) {
+    this._refreshState();
     return this.legacyMemories.get(key) || null;
   }
 
   delete(key) {
+    this._refreshState();
     const deleted = this.legacyMemories.delete(key);
+    if (deleted && this._storage) this._storage.prepare("DELETE FROM legacy_memories WHERE memory_key=?").run(key);
     if (deleted) this._persist();
     return deleted;
   }
 
   // Core L0-L6 API
   add(conversation, userId = "default", sessionId = null, importance = 0.9) {
+    this._refreshState();
     if (typeof conversation !== "string" || !conversation.trim()) {
       throw new TypeError("conversation must be a non-empty string");
     }
@@ -291,6 +296,7 @@ class InfinityDB {
   }
 
   recall(query, options = {}) {
+    this._refreshState();
     if (typeof query !== "string") throw new TypeError("query must be a string");
     const n = options.n === undefined ? 5 : options.n;
     if (!Number.isInteger(n) || n <= 0) {
@@ -384,6 +390,7 @@ class InfinityDB {
   }
 
   getProof(atomId) {
+    this._refreshState();
     const p = this.proofs.get(atomId);
     if (!p) return null;
     const source = this.logs.get(p.sourceLogId);
@@ -413,6 +420,7 @@ class InfinityDB {
   }
 
   getPersona(userId = "default") {
+    this._refreshState();
     const out = {};
     for (const [key, p] of this.personas.entries()) {
       if (p.userId === userId) {
@@ -423,6 +431,7 @@ class InfinityDB {
   }
 
   addPolicy(rule, domain = "general", priority = 1.0) {
+    this._refreshState();
     const pid = `L4_${this._sha256(rule + domain).slice(0, 12)}`;
     this.policies.set(pid, { id: pid, rule, domain, priority, createdAt: Date.now() / 1000 });
     this._persist();
@@ -445,6 +454,7 @@ class InfinityDB {
   }
 
   deleteUser(userId) {
+    this._refreshState();
     let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
     for (const [id, log] of Array.from(this.logs.entries())) {
       if (log.userId === userId) { this.logs.delete(id); c0++; }
@@ -462,6 +472,15 @@ class InfinityDB {
     for (const [key, p] of Array.from(this.personas.entries())) {
       if (p.userId === userId) { this.personas.delete(key); c3++; }
     }
+    if (this._storage) {
+      this._storage.transaction(() => {
+        this._storage.prepare("DELETE FROM l0_logs WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l1_atoms WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l2_episodes WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l3_personas WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l6_proofs WHERE source_log_id NOT IN (SELECT id FROM l0_logs)").run();
+      })();
+    }
     this._persist();
     return {
       l0LogsDeleted: c0,
@@ -473,6 +492,7 @@ class InfinityDB {
   }
 
   stats() {
+    this._refreshState();
     return {
       l0RawLogs: this.logs.size,
       l1AtomFacts: this.atoms.size,
