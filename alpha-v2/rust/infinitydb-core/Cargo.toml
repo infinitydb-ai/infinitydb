@@ -1,0 +1,10 @@
+[package]
+name = "infinitydb-core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Allocation-light score fusion and token-estimation primitives"
+
+[lib]
+name = "infinitydb_core"
+path = "src/lib.rs"
