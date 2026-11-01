@@ -143,14 +143,19 @@ def test_exact_vector_search_is_tenant_scoped_and_ranked(store):
 
 
 def test_vector_search_respects_temporal_and_kind_filters(store):
-    now = time.time()
+    expired_at = time.time()
     expired = store.add_memory(
-        "expired vector memory", kind="fact", valid_from=now - 20, valid_to=now - 1
+        "expired vector memory", kind="fact",
+        valid_from=expired_at - 20, valid_to=expired_at - 1,
     )
     current = store.add_memory("current vector memory", kind="episode")
     store.set_embedding(expired, [1.0, 0.0])
     store.set_embedding(current, [1.0, 0.0])
-    hits = store.search_vector([1.0, 0.0], kinds=["episode"], as_of=now)
+
+    # Capture the query time after insertion: add_memory assigns valid_from
+    # using its own clock, so an earlier timestamp can precede this memory.
+    as_of = time.time()
+    hits = store.search_vector([1.0, 0.0], kinds=["episode"], as_of=as_of)
     assert [hit.memory.id for hit in hits] == [current]
 
 
