@@ -57,8 +57,8 @@ class OllamaEmbeddingProvider:
             raise ValueError("model must not be empty")
         if timeout <= 0 or not math.isfinite(timeout):
             raise ValueError("timeout must be a finite positive number")
-        if dimensions is not None and dimensions < 1:
-            raise ValueError("dimensions must be positive")
+        if dimensions is not None and dimensions < 2:
+            raise ValueError("dimensions must be at least 2")
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -84,8 +84,8 @@ class OllamaEmbeddingProvider:
         vectors: list[list[float]] = []
         observed_dimensions: int | None = None
         for vector in raw:
-            if not isinstance(vector, list) or not vector:
-                raise EmbeddingError("Ollama returned an empty or malformed embedding")
+            if not isinstance(vector, list) or len(vector) < 2:
+                raise EmbeddingError("Ollama returned an embedding with fewer than 2 dimensions")
             try:
                 values = [float(value) for value in vector]
             except (TypeError, ValueError) as exc:
