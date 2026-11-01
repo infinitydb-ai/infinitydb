@@ -108,6 +108,28 @@ const val = db.get("session:123");
 db.delete("session:123");
 ```
 
+
+### 7. Durable SQLite storage (Node.js)
+
+Install the package dependencies, then provide a database path to enable durable storage:
+
+```javascript
+const { InfinityDB } = require("infinitydb");
+const db = new InfinityDB({ dbPath: "./data/infinitydb.sqlite" });
+
+db.add("I prefer SQLite for durable memory.", "user_123");
+console.log(db.recall("SQLite", { userId: "user_123" }).results);
+
+// Close cleanly before process shutdown. Reopen with the same dbPath to recover state.
+db.close();
+```
+
+When `dbPath` is omitted, the SDK remains in-memory for backwards compatibility.
+The SQLite-backed mode uses WAL and FULL synchronous commits. The current implementation
+persists an atomic versioned state snapshot per mutation; it is intended for durable
+single-process deployments, not concurrent multi-process writers or large-scale workloads.
+Back up the database together with its SQLite WAL state using SQLite's backup facilities.
+
 ---
 
 ## Architecture (L0 – L6 Brain)

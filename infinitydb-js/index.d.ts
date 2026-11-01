@@ -13,7 +13,7 @@ export interface RecallResponse {
   causalGraph: Array<{ cause: string; effect: string; relation: string }>;
   policies: Array<{ id: string; rule: string; domain: string; priority: number }>;
   latencyMs: number;
-  tokensSaved: string;
+  tokensSaved: string | null;
   proofAvailable: boolean;
 }
 
@@ -28,7 +28,7 @@ export interface ProofResponse {
 }
 
 export class InfinityDB {
-  constructor(options?: Record<string, any>);
+  constructor(options?: { dbPath?: string } & Record<string, any>);
   add(conversation: string, userId?: string, sessionId?: string | null, importance?: number): string;
   recall(query: string, options?: { n?: number; userId?: string | null }): RecallResponse;
   getProof(atomId: string): ProofResponse | null;
@@ -37,6 +37,7 @@ export class InfinityDB {
   exportGraph(userId?: string): string;
   deleteUser(userId: string): Record<string, any>;
   stats(): Record<string, any>;
+  close(): void;
   put(key: string, content: string): { key: string; content: string; createdAt: string };
   get(key: string): { key: string; content: string; createdAt: string } | null;
   delete(key: string): boolean;

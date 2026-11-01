@@ -17,6 +17,21 @@ class InfinityDB {
   constructor(options = {}) {
     this.options = options;
     this._seq = 0;
+    this._storage = null;
+    if (options.dbPath) {
+      const Database = require("better-sqlite3");
+      this._storage = new Database(options.dbPath);
+      this._storage.pragma("journal_mode = WAL");
+      this._storage.pragma("synchronous = FULL");
+      this._storage.exec(`
+        CREATE TABLE IF NOT EXISTS infinitydb_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          schema_version INTEGER NOT NULL,
+          payload TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    }
     this.logs = new Map(); // L0: id -> { id, userId, sessionId, raw, ts }
     this.atoms = new Map(); // L1: id -> { id, userId, fact, category, sourceId, importance, accessCount, ts }
     this.episodes = new Map(); // L2: id -> { id, userId, cause, effect, relation, sourceId, ts }
@@ -24,6 +39,49 @@ class InfinityDB {
     this.policies = new Map(); // L4: id -> { id, rule, domain, priority, createdAt }
     this.proofs = new Map(); // L6: atomId -> { atomId, hash, sourceLogId, rawSnippet, charStart, charEnd, ts }
     this.legacyMemories = new Map(); // Legacy put/get
+    this._loadState();
+  }
+
+  _loadState() {
+    if (!this._storage) return;
+    const row = this._storage.prepare(
+      "SELECT schema_version, payload FROM infinitydb_state WHERE id = 1"
+    ).get();
+    if (!row) return;
+    if (row.schema_version !== 1) {
+      throw new Error(`Unsupported InfinityDB storage schema version: ${row.schema_version}`);
+    }
+    const state = JSON.parse(row.payload);
+    this._seq = state.seq || 0;
+    for (const key of ["logs", "atoms", "episodes", "personas", "policies", "proofs", "legacyMemories"]) {
+      if (Array.isArray(state[key])) this[key] = new Map(state[key]);
+    }
+  }
+
+  _persist() {
+    if (!this._storage) return;
+    const payload = JSON.stringify({
+      seq: this._seq,
+      logs: Array.from(this.logs.entries()),
+      atoms: Array.from(this.atoms.entries()),
+      episodes: Array.from(this.episodes.entries()),
+      personas: Array.from(this.personas.entries()),
+      policies: Array.from(this.policies.entries()),
+      proofs: Array.from(this.proofs.entries()),
+      legacyMemories: Array.from(this.legacyMemories.entries()),
+    });
+    this._storage.prepare(`
+      INSERT INTO infinitydb_state (id, schema_version, payload, updated_at)
+      VALUES (1, 1, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET
+        schema_version = excluded.schema_version,
+        payload = excluded.payload,
+        updated_at = excluded.updated_at
+    `).run(payload);
+  }
+
+  close() {
+    if (this._storage && this._storage.open) this._storage.close();
   }
 
   _sha256(str) {
@@ -37,6 +95,7 @@ class InfinityDB {
     const mem = { key, content, createdAt: new Date().toISOString() };
     this.legacyMemories.set(key, mem);
     this.add(`Memory key ${key}: ${content}`, "legacy");
+    this._persist();
     return mem;
   }
 
@@ -45,7 +104,9 @@ class InfinityDB {
   }
 
   delete(key) {
-    return this.legacyMemories.delete(key);
+    const deleted = this.legacyMemories.delete(key);
+    if (deleted) this._persist();
+    return deleted;
   }
 
   // Core L0-L6 API
@@ -180,6 +241,7 @@ class InfinityDB {
       });
     }
 
+    this._persist();
     return logId;
   }
 
@@ -247,6 +309,8 @@ class InfinityDB {
       const at = this.atoms.get(item.id);
       if (at) at.accessCount++;
     }
+
+    this._persist();
 
     // Causal graph insights
     const causalGraph = [];
@@ -316,6 +380,7 @@ class InfinityDB {
   addPolicy(rule, domain = "general", priority = 1.0) {
     const pid = `L4_${this._sha256(rule + domain).slice(0, 12)}`;
     this.policies.set(pid, { id: pid, rule, domain, priority, createdAt: Date.now() / 1000 });
+    this._persist();
     return pid;
   }
 
@@ -352,6 +417,7 @@ class InfinityDB {
     for (const [key, p] of Array.from(this.personas.entries())) {
       if (p.userId === userId) { this.personas.delete(key); c3++; }
     }
+    this._persist();
     return {
       l0LogsDeleted: c0,
       l1AtomsDeleted: c1,
