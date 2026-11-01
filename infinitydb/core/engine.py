@@ -1,13 +1,15 @@
-"""InfinityDB - High-Performance Agent Memory Engine.
+"""InfinityDB - local agent memory engine.
 
 Architecture:
-- L0: Raw Conversation & Tool Logs (encrypted/compressed, offloaded from context)
-- L1: Atomic Facts (deterministic rule-based zero-LLM extraction, <10ms)
-- L2: Episode Graph (causal and temporal relationships)
-- L3: Persona DNA (structured user profile with conflict auto-resolution)
-- L4: Policy Engine (enterprise SOPs & corporate guardrails)
-- L5: Ebbinghaus Forgetting Curve (temporal decay & access reinforcement)
-- L6: Cryptographic Proof Chain (SHA-256 tamper-proof provenance linking to L0)
+- L0: Raw conversation and tool logs
+- L1: Atomic facts extracted by deterministic rules
+- L2: Episode graph for extracted causal and temporal relationships
+- L3: Structured persona records
+- L4: Tenant-scoped policies
+- L5: Time-decay and access-reinforcement scoring
+- L6: SHA-256 provenance records linking facts to source logs
+
+Extraction coverage and retrieval performance depend on input and workload.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ class InfinityDB:
     """InfinityDB L0-L6 Brain Engine.
 
     Supports both in-memory and persistent SQLite with WAL mode,
-    hybrid BM25 + Ebbinghaus time-decay recall, causal relation tracking,
+    FTS5 candidate retrieval with importance and time-decay scoring, causal relation tracking,
     persona conflict resolution, enterprise policies, and cryptographic proof chains.
     """
 
@@ -236,7 +238,7 @@ class InfinityDB:
     ) -> str:
         """Ingest raw conversation or tool log into L0-L6 Brain pipeline.
 
-        Executes zero-LLM deterministic extraction (<10ms), constructs causal
+        Executes deterministic rule-based extraction without an LLM call, constructs causal
         edges, updates persona profile with conflict auto-resolution, and links
         cryptographic proof records.
         """
