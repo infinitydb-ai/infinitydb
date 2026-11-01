@@ -88,6 +88,28 @@ class InfinityDB:
             CREATE INDEX IF NOT EXISTS idx_l1_user_cat ON l1_atoms(user_id, category);
             CREATE INDEX IF NOT EXISTS idx_l1_fact ON l1_atoms(fact);
 
+            -- Indexed full-text retrieval for L1 atoms. Triggers keep the index in sync.
+            CREATE VIRTUAL TABLE IF NOT EXISTS l1_atoms_fts
+            USING fts5(fact, content='l1_atoms', content_rowid='rowid',
+                       tokenize='unicode61 remove_diacritics 2');
+            CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_insert AFTER INSERT ON l1_atoms BEGIN
+                INSERT INTO l1_atoms_fts(rowid, fact) VALUES (new.rowid, new.fact);
+            END;
+            CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_delete AFTER DELETE ON l1_atoms BEGIN
+                INSERT INTO l1_atoms_fts(l1_atoms_fts, rowid, fact)
+                VALUES ('delete', old.rowid, old.fact);
+            END;
+            CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_update AFTER UPDATE OF fact ON l1_atoms BEGIN
+                INSERT INTO l1_atoms_fts(l1_atoms_fts, rowid, fact)
+                VALUES ('delete', old.rowid, old.fact);
+                INSERT INTO l1_atoms_fts(rowid, fact) VALUES (new.rowid, new.fact);
+            END;
+
+            CREATE TABLE IF NOT EXISTS infinitydb_schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             -- L2: Episode Graph (Causal & Temporal edges)
             CREATE TABLE IF NOT EXISTS l2_episodes (
                 id TEXT PRIMARY KEY,
@@ -133,6 +155,17 @@ class InfinityDB:
             );
             """
         )
+        # Build the FTS index once for databases created before FTS was introduced.
+        # Triggers maintain it transactionally for all subsequent writes/deletes.
+        fts_version = self.conn.execute(
+            "SELECT value FROM infinitydb_schema_meta WHERE key = 'l1_atoms_fts_version'"
+        ).fetchone()
+        if fts_version is None:
+            self.conn.execute("INSERT INTO l1_atoms_fts(l1_atoms_fts) VALUES ('rebuild')")
+            self.conn.execute(
+                "INSERT INTO infinitydb_schema_meta(key, value) VALUES (?, ?)",
+                ("l1_atoms_fts_version", "1"),
+            )
         self.conn.commit()
 
     @staticmethod
@@ -355,59 +388,67 @@ class InfinityDB:
         q_terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 1]
         now = time.time()
 
-        # Query L1 atoms
-        sql = "SELECT id, user_id, fact, category, source_id, importance, access_count, ts FROM l1_atoms"
-        params: list[Any] = []
-        if user_id:
-            sql += " WHERE user_id = ?"
-            params.append(user_id)
-
-        cur = self.conn.execute(sql, params) if q_terms else None
-        rows = cur.fetchall() if cur is not None else []
-
+        # FTS5 narrows candidates before Python applies importance and time-decay.
+        # Quote each token so user input cannot inject FTS operators.
         scored_results = []
         atom_ids_accessed = []
+        if q_terms:
+            match_query = " OR ".join(
+                '"' + term.replace('"', '""') + '"' for term in q_terms
+            )
+            sql = """
+                SELECT a.id, a.user_id, a.fact, a.category, a.source_id,
+                       a.importance, a.access_count, a.ts
+                FROM l1_atoms_fts f
+                JOIN l1_atoms a ON a.rowid = f.rowid
+                WHERE l1_atoms_fts MATCH ?
+            """
+            params: list[Any] = [match_query]
+            if user_id:
+                sql += " AND a.user_id = ?"
+                params.append(user_id)
+            cur = self.conn.execute(sql, params)
+            rows = cur.fetchall()
 
-        for row in rows:
-            fact = row["fact"]
-            fact_lower = fact.lower()
-            term_matches = sum(1 for term in q_terms if term in fact_lower)
+            for row in rows:
+                fact = row["fact"]
+                fact_lower = fact.lower()
+                term_matches = sum(1 for term in q_terms if term in fact_lower)
 
-            # BM25-style term frequency & exact phrase boost
-            term_score = term_matches * 2.5
-            if query.lower() in fact_lower:
-                term_score += 4.0
+                # BM25-style term frequency & exact phrase boost.
+                term_score = term_matches * 2.5
+                if query.lower() in fact_lower:
+                    term_score += 4.0
 
-            # L5 Ebbinghaus Forgetting Curve:
-            # R = e^(-Δt / S) where S is stability based on importance and access count
-            delta_days = (now - row["ts"]) / 86400.0
-            stability = 1.0 + (row["importance"] * 3.0) + math.log1p(row["access_count"])
-            retention_decay = math.exp(-delta_days / max(stability, 0.1))
+                # L5 Ebbinghaus retention decay.
+                delta_days = (now - row["ts"]) / 86400.0
+                stability = 1.0 + (row["importance"] * 3.0) + math.log1p(row["access_count"])
+                retention_decay = math.exp(-delta_days / max(stability, 0.1))
+                total_score = (term_score + row["importance"] * 1.5) * retention_decay
 
-            total_score = (term_score + row["importance"] * 1.5) * retention_decay
+                if term_matches > 0:
+                    scored_results.append({
+                        "id": row["id"],
+                        "fact": fact,
+                        "category": row["category"],
+                        "source_id": row["source_id"],
+                        "score": round(total_score, 4),
+                        "retention": round(retention_decay, 3),
+                        "ts": row["ts"],
+                    })
 
-            if term_matches > 0 or total_score > 0.5:
-                scored_results.append({
-                    "id": row["id"],
-                    "fact": fact,
-                    "category": row["category"],
-                    "source_id": row["source_id"],
-                    "score": round(total_score, 4),
-                    "retention": round(retention_decay, 3),
-                    "ts": row["ts"],
-                })
-                atom_ids_accessed.append(row["id"])
 
         # Sort descending by composite score
         scored_results.sort(key=lambda x: x["score"], reverse=True)
         top_k = scored_results[:n]
 
-        # Increment access count to reinforce memories (Ebbinghaus spaced repetition)
-        if atom_ids_accessed:
-            id_placeholders = ",".join("?" for _ in atom_ids_accessed[:n])
+        # Reinforce only the memories actually returned to the caller.
+        top_ids = [item["id"] for item in top_k]
+        if top_ids:
+            id_placeholders = ",".join("?" for _ in top_ids)
             self.conn.execute(
                 f"UPDATE l1_atoms SET access_count = access_count + 1 WHERE id IN ({id_placeholders})",
-                atom_ids_accessed[:n],
+                top_ids,
             )
             self.conn.commit()
 
