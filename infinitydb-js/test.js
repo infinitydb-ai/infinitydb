@@ -117,6 +117,8 @@ try {
   const first = new InfinityDB({ dbPath: normalizedPath });
   const second = new InfinityDB({ dbPath: normalizedPath });
   const firstLog = first.add("I prefer PostgreSQL for production storage.", "shared_user");
+  assert.ok(first.recall("PostgreSQL", { userId: "shared_user" }).results.length > 0);
+  assert.strictEqual(first.recall("nonexistentterm", { userId: "shared_user" }).results.length, 0);
   assert.ok(second.recall("PostgreSQL", { userId: "shared_user" }).results.length > 0);
   const secondLog = second.add("I prefer Redis for cache workloads.", "shared_user");
   assert.ok(first.recall("Redis", { userId: "shared_user" }).results.length > 0);
@@ -133,6 +135,17 @@ try {
   assert.ok(!tables.includes("infinitydb_state"));
   assert.strictEqual(raw.prepare("SELECT count(*) AS n FROM l0_logs").get().n, 2);
   raw.close();
+
+  // Existing schema-v2 databases rebuild a missing FTS index on open.
+  const ftsRepair = new schemaDb(normalizedPath);
+  ftsRepair.prepare("DELETE FROM infinitydb_meta WHERE key='l1_atoms_fts_version'").run();
+  ftsRepair.prepare("INSERT INTO l1_atoms_fts(l1_atoms_fts) VALUES ('delete-all')").run();
+  ftsRepair.close();
+  const repaired = new InfinityDB({ dbPath: normalizedPath });
+  assert.ok(repaired.recall("PostgreSQL", { userId: "shared_user" }).results.length > 0);
+  repaired.deleteUser("shared_user");
+  assert.strictEqual(repaired.recall("PostgreSQL", { userId: "shared_user" }).results.length, 0);
+  repaired.close();
 
   // Simulate a v1 snapshot database and ensure it migrates without data loss.
   const legacyPath = path.join(tempDir, "legacy-v1.sqlite");
