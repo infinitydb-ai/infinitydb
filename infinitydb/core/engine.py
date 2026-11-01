@@ -431,12 +431,16 @@ class InfinityDB:
         }
 
     def get_proof(self, atom_id: str) -> dict[str, Any] | None:
-        """L6 Cryptographic Proof Chain: Retrieve cryptographic hash and raw provenance snippet."""
+        """Retrieve provenance and cryptographically verify it against L0."""
+        from infinitydb.core.proof import verify_proof
+
         cur = self.conn.execute(
             """
-            SELECT p.atom_id, p.hash, p.source_log_id, p.raw_snippet, p.char_start, p.char_end, p.ts, l.raw
+            SELECT p.atom_id, p.hash, p.source_log_id, p.raw_snippet,
+                   p.char_start, p.char_end, p.ts, l.raw, a.fact
             FROM l6_proof p
             JOIN l0_logs l ON p.source_log_id = l.id
+            JOIN l1_atoms a ON a.id = p.atom_id
             WHERE p.atom_id = ?
             """,
             (atom_id,),
@@ -444,13 +448,22 @@ class InfinityDB:
         row = cur.fetchone()
         if not row:
             return None
+
+        verified = verify_proof(
+            row["hash"],
+            row["fact"],
+            row["source_log_id"],
+            row["raw"],
+            row["char_start"],
+            row["char_end"],
+        )
         return {
             "atom_id": row["atom_id"],
             "hash": row["hash"],
             "source_log_id": row["source_log_id"],
             "raw_snippet": row["raw_snippet"],
             "char_range": [row["char_start"], row["char_end"]],
-            "verified": True,
+            "verified": verified,
             "timestamp": row["ts"],
         }
 
