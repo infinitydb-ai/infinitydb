@@ -186,7 +186,8 @@ assert.throws(() => temporal.recall("Python", { asOf: Infinity }), /finite Unix 
 assert.strictEqual(temporal.getProof(oldFact.id).verified, true);
 
 // 13. Temporal relation survives SQLite reopen and is removed on tenant deletion.
-const temporalPath = path.join(tempDir, "temporal.sqlite");
+const temporalDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-temporal-"));
+const temporalPath = path.join(temporalDir, "temporal.sqlite");
 const temporalSql = new InfinityDB({ dbPath: temporalPath });
 const temporalOldLog = temporalSql.add("I prefer Java for backend services.", "temporal_sql_user");
 const temporalOld = Array.from(temporalSql.atoms.values()).find(a => a.sourceId === temporalOldLog);
@@ -202,5 +203,6 @@ assert.strictEqual(temporalReopened.relations.length, 1);
 temporalReopened.deleteUser("temporal_sql_user");
 assert.strictEqual(temporalReopened.relations.length, 0);
 temporalReopened.close();
+fs.rmSync(temporalDir, { recursive: true, force: true });
 
 console.log("[PASS] All JavaScript tests passed successfully!");
