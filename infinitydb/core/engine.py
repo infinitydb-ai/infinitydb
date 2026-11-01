@@ -53,7 +53,9 @@ class InfinityDB:
 
         if not self._is_memory:
             self.conn.execute("PRAGMA journal_mode = WAL;")
-            self.conn.execute("PRAGMA synchronous = NORMAL;")
+            # Match the Node.js SDK's FULL synchronous setting. In WAL mode this
+            # requests an fsync of the WAL on each committed transaction.
+            self.conn.execute("PRAGMA synchronous = FULL;")
         self.conn.execute("PRAGMA foreign_keys = ON;")
 
         self._init_schema()
