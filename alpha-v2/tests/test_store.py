@@ -438,10 +438,8 @@ def test_bounded_graph_traversal_returns_explainable_shortest_paths(store):
     seed = store.add_memory("seed", tenant_id="graph")
     middle = store.add_memory("middle", tenant_id="graph")
     target = store.add_memory("target", tenant_id="graph")
-    foreign = store.add_memory("foreign", tenant_id="other")
     store.add_edge(seed, middle, "supports", tenant_id="graph", weight=0.8)
     store.add_edge(middle, target, "causes", tenant_id="graph", weight=0.5)
-    store.add_edge(seed, foreign, "leaks", tenant_id="graph") if False else None
 
     hits = store.traverse_graph([seed], tenant_id="graph", max_hops=2)
     assert [(hit.memory.id, hit.depth) for hit in hits] == [(middle, 1), (target, 2)]
@@ -452,9 +450,9 @@ def test_bounded_graph_traversal_returns_explainable_shortest_paths(store):
 
 
 def test_graph_traversal_filters_relations_and_temporal_memories(store):
-    seed = store.add_memory("graph seed", tenant_id="graph-filter")
-    included = store.add_memory("included node", tenant_id="graph-filter")
-    excluded = store.add_memory("excluded node", tenant_id="graph-filter")
+    seed = store.add_memory("graph seed", tenant_id="graph-filter", valid_from=1.0)
+    included = store.add_memory("included node", tenant_id="graph-filter", valid_from=1.0)
+    excluded = store.add_memory("excluded node", tenant_id="graph-filter", valid_from=1.0)
     expired = store.add_memory("expired node", tenant_id="graph-filter",
                                valid_from=1.0, valid_to=2.0)
     store.add_edge(seed, included, "supports", tenant_id="graph-filter")
@@ -471,7 +469,8 @@ def test_graph_traversal_is_tenant_scoped_and_cycle_safe(store):
     neighbor = store.add_memory("tenant A neighbor", tenant_id="tenant-a")
     foreign = store.add_memory("tenant B node", tenant_id="tenant-b")
     store.add_edge(seed, neighbor, "related", tenant_id="tenant-a")
-    store.add_edge(seed, foreign, "related", tenant_id="tenant-b")
+    foreign_peer = store.add_memory("tenant B peer", tenant_id="tenant-b")
+    store.add_edge(foreign, foreign_peer, "related", tenant_id="tenant-b")
     store.add_edge(neighbor, seed, "back", tenant_id="tenant-a")
 
     hits = store.traverse_graph([seed], tenant_id="tenant-a", max_hops=5)
