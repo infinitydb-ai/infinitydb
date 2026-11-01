@@ -6,6 +6,7 @@ the source character range still contains the exact extracted fact.
 from __future__ import annotations
 
 import hashlib
+import hmac
 
 
 def verify_proof(
@@ -25,4 +26,4 @@ def verify_proof(
     if source_fact != fact:
         return False
     expected = hashlib.sha256((fact + source_log_id).encode("utf-8")).hexdigest()
-    return hashlib.compare_digest(expected, hash_str)
+    return hmac.compare_digest(expected, hash_str)
