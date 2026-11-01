@@ -144,6 +144,19 @@ class InfinityDB:
             );
             CREATE INDEX IF NOT EXISTS idx_l4_domain ON l4_policies(domain);
 
+            -- Explicit, auditable fact supersession. Facts remain immutable in L1.
+            CREATE TABLE IF NOT EXISTS l1_atom_relations (
+                old_atom_id TEXT NOT NULL,
+                new_atom_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                relation TEXT NOT NULL CHECK (relation = 'supersedes'),
+                created_at REAL NOT NULL,
+                PRIMARY KEY (old_atom_id, new_atom_id),
+                CHECK (old_atom_id <> new_atom_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_l1_relations_user_time
+                ON l1_atom_relations(user_id, created_at);
+
             -- L6: Cryptographic Proof Chain linking atoms to raw logs
             CREATE TABLE IF NOT EXISTS l6_proof (
                 atom_id TEXT PRIMARY KEY,
@@ -375,12 +388,57 @@ class InfinityDB:
                     (fact, confidence, source_atom_id, timestamp, user_id, category),
                 )
 
+    def supersede_fact(
+        self, old_atom_id: str, new_atom_id: str, user_id: str
+    ) -> str:
+        """Record explicit, tenant-scoped supersession without deleting history."""
+        if not all(isinstance(v, str) and v.strip() for v in
+                   (old_atom_id, new_atom_id, user_id)):
+            raise ValueError("atom ids and user_id must be non-empty strings")
+        if old_atom_id == new_atom_id:
+            raise ValueError("a fact cannot supersede itself")
+        old = self.conn.execute(
+            "SELECT user_id FROM l1_atoms WHERE id = ?", (old_atom_id,)
+        ).fetchone()
+        new = self.conn.execute(
+            "SELECT user_id FROM l1_atoms WHERE id = ?", (new_atom_id,)
+        ).fetchone()
+        if old is None or new is None:
+            raise ValueError("both facts must exist")
+        if old["user_id"] != user_id or new["user_id"] != user_id:
+            raise ValueError("both facts must belong to the supplied user_id")
+        cycle = self.conn.execute(
+            """
+            WITH RECURSIVE descendants(atom_id) AS (
+                SELECT new_atom_id FROM l1_atom_relations WHERE old_atom_id = ?
+                UNION
+                SELECT r.new_atom_id FROM l1_atom_relations r
+                JOIN descendants d ON r.old_atom_id = d.atom_id
+            )
+            SELECT 1 FROM descendants WHERE atom_id = ? LIMIT 1
+            """, (new_atom_id, old_atom_id)
+        ).fetchone()
+        if cycle:
+            raise ValueError("supersession would create a cycle")
+        created_at = time.time()
+        self.conn.execute(
+            """INSERT INTO l1_atom_relations
+               (old_atom_id, new_atom_id, user_id, relation, created_at)
+               VALUES (?, ?, ?, 'supersedes', ?)""",
+            (old_atom_id, new_atom_id, user_id, created_at),
+        )
+        self.conn.commit()
+        return self._sha256(
+            f"{user_id}:{old_atom_id}:{new_atom_id}:{created_at}"
+        )[:24]
+
     def recall(
         self,
         query: str,
         n: int = 5,
         user_id: str | None = None,
         include_policies: bool = True,
+        as_of: float | None = None,
     ) -> dict[str, Any]:
         """Hybrid memory recall combining BM25 keyword matching, causal links,
 
@@ -395,6 +453,12 @@ class InfinityDB:
             raise ValueError("n must be a positive integer")
         if user_id is not None and (not isinstance(user_id, str) or not user_id.strip()):
             raise ValueError("user_id cannot be empty")
+
+        if as_of is not None and (
+            isinstance(as_of, bool) or not isinstance(as_of, (int, float))
+            or not math.isfinite(as_of)
+        ):
+            raise ValueError("as_of must be a finite Unix timestamp")
 
         start_time = time.perf_counter()
         q_terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 1]
@@ -414,8 +478,14 @@ class InfinityDB:
                 FROM l1_atoms_fts f
                 JOIN l1_atoms a ON a.rowid = f.rowid
                 WHERE l1_atoms_fts MATCH ?
+                  AND (? IS NULL OR a.ts <= ?)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM l1_atom_relations r
+                      WHERE r.old_atom_id = a.id
+                        AND (? IS NULL OR r.created_at <= ?)
+                  )
             """
-            params: list[Any] = [match_query]
+            params: list[Any] = [match_query, as_of, as_of, as_of, as_of]
             if user_id:
                 sql += " AND a.user_id = ?"
                 params.append(user_id)
@@ -624,6 +694,9 @@ class InfinityDB:
             placeholders = ",".join("?" for _ in atom_ids)
             self.conn.execute(f"DELETE FROM l6_proof WHERE atom_id IN ({placeholders})", atom_ids)
 
+        self.conn.execute(
+            "DELETE FROM l1_atom_relations WHERE user_id = ?", (user_id,)
+        )
         c1 = self.conn.execute("DELETE FROM l1_atoms WHERE user_id = ?", (user_id,)).rowcount
         c0 = self.conn.execute("DELETE FROM l0_logs WHERE user_id = ?", (user_id,)).rowcount
         c2 = self.conn.execute("DELETE FROM l2_episodes WHERE user_id = ?", (user_id,)).rowcount
