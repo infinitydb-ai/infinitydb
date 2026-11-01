@@ -266,10 +266,16 @@ class InfinityDB {
 
   delete(key) {
     this._refreshState();
-    const deleted = this.legacyMemories.delete(key);
-    if (deleted && this._storage) this._storage.prepare("DELETE FROM legacy_memories WHERE memory_key=?").run(key);
-    if (deleted) this._persist();
-    return deleted;
+    if (!this.legacyMemories.has(key)) return false;
+    const previous = this.legacyMemories.get(key);
+    this.legacyMemories.delete(key);
+    try {
+      this._persist();
+    } catch (error) {
+      this.legacyMemories.set(key, previous);
+      throw error;
+    }
+    return true;
   }
 
   // Core L0-L6 API
@@ -669,7 +675,13 @@ class InfinityDB {
     const existing = this.policies.get(pid);
     this.policies.set(pid, { id: pid, rule: rule.trim(), domain: domain.trim(), priority,
       tenantId, createdAt: existing?.createdAt ?? Date.now() / 1000 });
-    this._persist();
+    try {
+      this._persist();
+    } catch (error) {
+      if (existing) this.policies.set(pid, existing);
+      else this.policies.delete(pid);
+      throw error;
+    }
     return pid;
   }
 
