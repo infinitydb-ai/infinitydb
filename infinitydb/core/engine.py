@@ -299,10 +299,22 @@ class InfinityDB:
 
         # Fallback if no specific regex pattern matched: sentences with key indicators
         if not extracted_atoms:
-            sentences = [s.strip() for s in re.split(r"[.!?\n]", conversation) if len(s.strip()) > 8]
-            for s in sentences[:3]:
-                atom_id = f"L1_{self._sha256(log_id + s)[:16]}"
-                extracted_atoms.append((atom_id, s, "general", 0.75, 0, min(len(conversation), 100)))
+            # Keep fallback fact offsets aligned with the exact punctuation-free
+            # sentence stored in L1 so its L6 source-range proof can verify.
+            for sentence_match in re.finditer(r"[^.!?\n]+", conversation):
+                raw_sentence = sentence_match.group(0)
+                leading_whitespace = len(raw_sentence) - len(raw_sentence.lstrip())
+                fact = raw_sentence.strip()
+                if len(fact) <= 8:
+                    continue
+                start_idx = sentence_match.start() + leading_whitespace
+                end_idx = start_idx + len(fact)
+                atom_id = f"L1_{self._sha256(log_id + fact)[:16]}"
+                extracted_atoms.append(
+                    (atom_id, fact, "general", 0.75, start_idx, end_idx)
+                )
+                if len(extracted_atoms) == 3:
+                    break
 
         for atom_id, fact, cat, weight, start_idx, end_idx in extracted_atoms:
             # Store L1 Atom
