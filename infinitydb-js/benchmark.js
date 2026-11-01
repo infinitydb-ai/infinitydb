@@ -43,7 +43,7 @@ function parseArgs(argv) {
   return options;
 }
 
-function run(iterations, output = null) {
+function run(iterations, output = null, quiet = false) {
   if (!Number.isSafeInteger(iterations) || iterations < 1) {
     throw new Error("iterations must be a positive safe integer");
   }
@@ -120,7 +120,7 @@ function run(iterations, output = null) {
       storage: {},
       environment: {
         node: process.version,
-        platform: `${process.platform} ${process.release.name}`,
+        platform: `${os.platform()} ${os.release()}`,
         machine: os.arch(),
         sqlite: sqliteVersion,
         cpu_count: os.cpus().length,
