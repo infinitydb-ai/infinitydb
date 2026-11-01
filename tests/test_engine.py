@@ -23,6 +23,49 @@ def test_delete():
     assert db.delete("x") is False
 
 
+def test_legacy_memory_persists_across_reopen(tmp_path):
+    db_path = tmp_path / "legacy-memory.sqlite"
+    db = InfinityDB(str(db_path))
+    stored = db.put("persistent:key", "prefers durable storage")
+    db.close()
+
+    reopened = InfinityDB(str(db_path))
+    restored = reopened.get("persistent:key")
+    assert restored is not None
+    assert restored.content == stored.content
+    assert restored.created_at == stored.created_at
+    assert len(reopened) == 1
+    assert reopened.delete("persistent:key") is True
+    reopened.close()
+
+    final = InfinityDB(str(db_path))
+    assert final.get("persistent:key") is None
+    assert len(final) == 0
+    final.close()
+
+
+def test_legacy_put_rolls_back_all_layers_when_legacy_insert_fails():
+    db = InfinityDB()
+    db.conn.executescript("""
+        CREATE TRIGGER reject_legacy_memory_insert
+        BEFORE INSERT ON legacy_memories
+        BEGIN
+            SELECT RAISE(ABORT, 'simulated legacy insert failure');
+        END;
+    """)
+
+    with pytest.raises(Exception, match="simulated legacy insert failure"):
+        db.put("atomic:key", "must not partially persist")
+
+    assert db.get("atomic:key") is None
+    assert len(db) == 0
+    assert db.stats()["l0_raw_logs"] == 0
+    assert db.stats()["l1_atom_facts"] == 0
+    assert db.stats()["l2_causal_episodes"] == 0
+    assert db.stats()["l3_personas"] == 0
+    assert db.stats()["l6_cryptographic_proofs"] == 0
+
+
 def test_empty_key_rejected():
     """Verify validation on empty key/content."""
     db = InfinityDB()

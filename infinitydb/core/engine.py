@@ -60,8 +60,17 @@ class InfinityDB:
 
         self._init_schema()
 
-        # Legacy key-value cache
-        self._legacy_memories: dict[str, Memory] = {}
+        # Legacy key-value cache; SQLite remains the source of truth.
+        self._legacy_memories: dict[str, Memory] = {
+            row["memory_key"]: Memory(
+                key=row["memory_key"],
+                content=row["content"],
+                created_at=row["created_at"],
+            )
+            for row in self.conn.execute(
+                "SELECT memory_key, content, created_at FROM legacy_memories"
+            )
+        }
 
     def _init_schema(self) -> None:
         """Initialize relational tables and indices for L0-L6 layers."""
@@ -112,6 +121,13 @@ class InfinityDB:
             CREATE TABLE IF NOT EXISTS infinitydb_schema_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            -- Legacy key-value API records are durable across process restarts.
+            CREATE TABLE IF NOT EXISTS legacy_memories (
+                memory_key TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
 
             -- L2: Episode Graph (Causal & Temporal edges)
@@ -205,28 +221,55 @@ class InfinityDB:
     # Legacy Key-Value Compatibility (Passes existing tests)
     # -------------------------------------------------------------------------
     def put(self, key: str, content: str) -> Memory:
-        """Store key-value memory item (legacy interface)."""
-        if not key or not key.strip():
+        """Atomically persist a legacy key-value item and its L0-L6 record."""
+        if not isinstance(key, str) or not key.strip():
             raise ValueError("key cannot be empty")
-        if not content or not content.strip():
+        if not isinstance(content, str) or not content.strip():
             raise ValueError("content cannot be empty")
         memory = Memory(key=key, content=content)
+        with self.conn:
+            # Call the internal writer directly: nested sqlite3 connection
+            # context managers can commit independently and break atomicity.
+            self._add(f"Memory key {key}: {content}", user_id="legacy")
+            self.conn.execute(
+                """
+                INSERT INTO legacy_memories (memory_key, content, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(memory_key) DO UPDATE SET
+                    content = excluded.content,
+                    created_at = excluded.created_at
+                """,
+                (memory.key, memory.content, memory.created_at),
+            )
         self._legacy_memories[key] = memory
-
-        # Also store into L1/L3 store for unified memory
-        self.add(f"Memory key {key}: {content}", user_id="legacy")
         return memory
 
     def get(self, key: str) -> Memory | None:
-        """Retrieve key-value memory item (legacy interface)."""
-        return self._legacy_memories.get(key)
+        """Retrieve a legacy key-value item from the authoritative SQLite store."""
+        row = self.conn.execute(
+            "SELECT memory_key, content, created_at FROM legacy_memories WHERE memory_key = ?",
+            (key,),
+        ).fetchone()
+        if row is None:
+            self._legacy_memories.pop(key, None)
+            return None
+        memory = Memory(key=row["memory_key"], content=row["content"], created_at=row["created_at"])
+        self._legacy_memories[key] = memory
+        return memory
 
     def delete(self, key: str) -> bool:
-        """Delete key-value memory item (legacy interface)."""
-        return self._legacy_memories.pop(key, None) is not None
+        """Atomically delete a legacy key-value item."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "DELETE FROM legacy_memories WHERE memory_key = ?", (key,)
+            )
+        self._legacy_memories.pop(key, None)
+        return cursor.rowcount > 0
 
     def __len__(self) -> int:
-        return len(self._legacy_memories)
+        return int(self.conn.execute(
+            "SELECT count(*) FROM legacy_memories"
+        ).fetchone()[0])
 
     # -------------------------------------------------------------------------
     # Core L0-L6 Engine API
