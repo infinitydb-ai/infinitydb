@@ -126,3 +126,60 @@ def test_reopen_repairs_partial_fts_index():
             ).fetchone()[0] == 2
         finally:
             reopened.close()
+
+
+def test_exact_vector_search_is_tenant_scoped_and_ranked(store):
+    near = store.add_memory("near semantic match", tenant_id="tenant-a")
+    far = store.add_memory("far semantic match", tenant_id="tenant-a")
+    foreign = store.add_memory("foreign semantic match", tenant_id="tenant-b")
+    store.set_embedding(near, [1.0, 0.0], tenant_id="tenant-a")
+    store.set_embedding(far, [0.0, 1.0], tenant_id="tenant-a")
+    store.set_embedding(foreign, [1.0, 0.0], tenant_id="tenant-b")
+
+    hits = store.search_vector([0.9, 0.1], tenant_id="tenant-a")
+    assert [hit.memory.id for hit in hits] == [near, far]
+    assert hits[0].matched_by == ["exact_vector"]
+    assert store.search_vector([1.0, 0.0], tenant_id="tenant-b")[0].memory.id == foreign
+
+
+def test_vector_search_respects_temporal_and_kind_filters(store):
+    now = time.time()
+    expired = store.add_memory(
+        "expired vector memory", kind="fact", valid_from=now - 20, valid_to=now - 1
+    )
+    current = store.add_memory("current vector memory", kind="episode")
+    store.set_embedding(expired, [1.0, 0.0])
+    store.set_embedding(current, [1.0, 0.0])
+    hits = store.search_vector([1.0, 0.0], kinds=["episode"], as_of=now)
+    assert [hit.memory.id for hit in hits] == [current]
+
+
+@pytest.mark.parametrize("vector", [[], [0.0, 0.0], [float("nan")], [float("inf")]])
+def test_vector_validation_rejects_invalid_embeddings(store, vector):
+    memory_id = store.add_memory("vector target")
+    with pytest.raises(ValueError, match="embedding"):
+        store.set_embedding(memory_id, vector)
+
+
+def test_embedding_cannot_be_written_across_tenants(store):
+    memory_id = store.add_memory("private memory", tenant_id="tenant-a")
+    with pytest.raises(ValueError, match="specified tenant"):
+        store.set_embedding(memory_id, [1.0, 0.0], tenant_id="tenant-b")
+    assert store.search_vector([1.0, 0.0], tenant_id="tenant-a") == []
+
+
+def test_vector_embeddings_persist_after_reopen():
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "vectors.sqlite"
+        first = MemoryStore(database)
+        memory_id = first.add_memory("persistent vector memory", tenant_id="persist")
+        first.set_embedding(memory_id, [0.25, 0.75], tenant_id="persist")
+        first.close()
+
+        reopened = MemoryStore(database)
+        try:
+            hits = reopened.search_vector([0.25, 0.75], tenant_id="persist")
+            assert len(hits) == 1
+            assert hits[0].memory.id == memory_id
+        finally:
+            reopened.close()
