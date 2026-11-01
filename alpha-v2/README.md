@@ -12,6 +12,7 @@ This is an isolated alpha workspace integrated alongside the existing InfinityDB
 
 ## Install and test
 
+Python:
 ```bash
 cd alpha-v2
 python -m venv .venv
@@ -19,6 +20,13 @@ python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 pip install -e '.[test]'
 pytest -q
+```
+
+TypeScript SDK:
+```bash
+cd alpha-v2/sdk/typescript
+npm install
+npm test
 ```
 
 ## Explicit alpha limitations
