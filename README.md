@@ -184,6 +184,26 @@ Open `http://localhost:8080` to inspect:
 
 ---
 
+## Resource lifecycle (Python)
+
+Close persistent and in-memory database handles when the application is finished with
+them. Both the core engine and the high-level `AgentMemory` wrapper support context
+managers:
+
+```python
+from infinitydb import AgentMemory
+
+with AgentMemory("agent_memory.db") as memory:
+    memory.add("I prefer explicit cleanup.", user_id="agent-1")
+    facts = memory.search("cleanup", user_id="agent-1")
+```
+
+For long-lived objects managed manually, call `memory.close()` (or
+`db.close()` on the core `InfinityDB` instance). This closes the SQLite connection;
+it does not delete the database file.
+
+---
+
 ## Verification & Testing
 
 ```bash
