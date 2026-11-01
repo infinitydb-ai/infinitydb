@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import time
 import pytest
 from infinitydb import InfinityDB, Memory
@@ -581,3 +583,26 @@ def test_l4_policy_upsert_rolls_back_when_update_fails():
         (policy_id,),
     ).fetchone()
     assert tuple(after) == tuple(original)
+
+
+def test_shared_policy_conformance_fixture():
+    """Keep Python policy scope behavior aligned with the Node.js SDK fixture."""
+    fixture_path = Path(__file__).parent / "fixtures" / "sdk_policy_conformance.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    db = InfinityDB()
+    global_policy = fixture["global_policy"]
+    tenant_policy = fixture["tenant_policy"]
+    db.add_policy(global_policy["rule"], global_policy["domain"], global_policy["priority"])
+    db.add_policy(
+        tenant_policy["rule"], tenant_policy["domain"], tenant_policy["priority"],
+        tenant_id=tenant_policy["tenant_id"],
+    )
+
+    def rules(user_id=None):
+        return [item["rule"] for item in db.recall("policy", user_id=user_id)["policies"]]
+
+    assert rules(fixture["tenant_a"]) == fixture["expected"]["tenant_a"]
+    assert rules(fixture["tenant_b"]) == fixture["expected"]["tenant_b"]
+    assert rules() == fixture["expected"]["unscoped"]
+    db.delete_user(fixture["tenant_a"])
+    assert rules(fixture["tenant_a"]) == fixture["expected"]["tenant_a_after_delete"]
