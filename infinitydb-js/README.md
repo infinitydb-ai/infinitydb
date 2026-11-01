@@ -113,13 +113,15 @@ const recall = db.recall("database credentials", { userId: "usr_sarah" });
 console.log(recall.policies); // Injected active governance policies
 ```
 
-### 6. GDPR Right-to-be-Forgotten Compliance
+### 6. Tenant data deletion
 
 ```javascript
-// Instantly and irreversibly wipe all user logs, facts, and persona state
+// Remove this tenant’s stored logs, facts, episodes, and persona state
 const result = db.deleteUser("usr_sarah");
-console.log(result.gdprCompliant); // true
+console.log(result); // Per-layer deletion counts
 ```
+
+This API reports database deletion results only; it does not certify legal or regulatory compliance.
 
 ### 7. Backwards-Compatible Key-Value Store
 
