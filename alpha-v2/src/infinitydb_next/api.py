@@ -20,6 +20,12 @@ class SearchRequest(BaseModel):
     tenant_id: str = "default"
     limit: int = Field(default=10, ge=1, le=100)
 
+class VectorSearchRequest(BaseModel):
+    embedding: list[float]
+    tenant_id: str = "default"
+    limit: int = Field(default=10, ge=1, le=100)
+    kinds: list[str] = Field(default_factory=list)
+
 store = MemoryStore(os.environ.get("INFINITYDB_NEXT_PATH", "infinitydb-next.sqlite3"))
 app = FastAPI(title="InfinityDB Next Alpha API", version="2.0.0a1")
 
@@ -39,6 +45,20 @@ def search(body: SearchRequest) -> list[dict[str, Any]]:
     return [{"id": hit.memory.id, "content": hit.memory.content, "kind": hit.memory.kind,
              "score": hit.score, "matched_by": hit.matched_by}
             for hit in store.search(body.query, tenant_id=body.tenant_id, limit=body.limit)]
+
+@app.post("/v1/search/vector")
+def vector_search(body: VectorSearchRequest) -> list[dict[str, Any]]:
+    try:
+        hits = store.search_vector(
+            body.embedding, tenant_id=body.tenant_id,
+            limit=body.limit, kinds=body.kinds or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return [{"id": hit.memory.id, "content": hit.memory.content,
+             "kind": hit.memory.kind, "score": hit.score,
+             "matched_by": hit.matched_by} for hit in hits]
+
 
 @app.post("/v1/context")
 def context(body: SearchRequest) -> dict[str, Any]:
