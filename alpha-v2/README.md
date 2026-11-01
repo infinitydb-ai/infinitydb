@@ -127,10 +127,51 @@ not a claim of learned relevance ranking. Cycles are guarded by a visited set.
 ### Temporal fact supersession
 
 Use `MemoryStore.supersede_memory(memory_id, new_content, tenant_id=...)`
-when a fact is explicitly replaced. The operation atomically sets the old
-record's `valid_to`, creates the successor at the same valid-time boundary,
-and adds a tenant-local `supersedes` edge. Historical queries before the
-boundary can still retrieve the old fact; queries at or after it see the
-successor. The original evidence remains intact, and optional new evidence is
-attached to the successor. This is explicit versioning, not automatic
-contradiction detection: callers decide when two facts conflict.
+when an application has determined that a fact should be replaced. The
+operation runs in one SQLite transaction:
+
+1. Verify that the old memory exists in the requested tenant and is still open.
+2. Set the old memory's `valid_to` to the replacement timestamp.
+3. Insert the successor with `valid_from` set to that same timestamp.
+4. Add a tenant-local `supersedes` edge from the old memory to the successor.
+5. Optionally attach raw evidence to the successor.
+
+Example:
+
+```python
+from infinitydb_next import MemoryStore
+
+with MemoryStore("agent-memory.sqlite3") as store:
+    old_id = store.add_memory(
+        "The service runs in northstar",
+        tenant_id="acme",
+        valid_from=1_700_000_000,
+    )
+    new_id = store.supersede_memory(
+        old_id,
+        "The service now runs in southstar",
+        tenant_id="acme",
+        at=1_710_000_000,
+        raw_evidence="Approved deployment record #42",
+        source_id="deployment-42",
+    )
+
+    # Before the boundary, the previous fact remains valid.
+    historical = store.search(
+        "northstar", tenant_id="acme", as_of=1_705_000_000
+    )
+
+    # At the boundary, the successor is valid and the old fact is not.
+    current = store.search(
+        "southstar", tenant_id="acme", as_of=1_710_000_000
+    )
+```
+
+The method rejects missing memories, memories that already have a `valid_to`,
+non-finite timestamps, and replacement times earlier than the original
+`valid_from`. If any write (including evidence capture) fails, the transaction
+rolls back, leaving the old memory unchanged.
+
+This is explicit, caller-directed versioning. It does not infer contradictions,
+decide which statement is true, or automatically supersede memories. The
+application must make that decision and provide the replacement timestamp.
