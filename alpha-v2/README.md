@@ -53,7 +53,7 @@ print(provider.model_info)  # provider, model and observed dimensions
 
 with MemoryStore("demo.sqlite3") as store:
     memory_id = store.add_memory("A durable fact to remember", tenant_id="demo")
-    store.set_embedding(memory_id, vectors[0], tenant_id="demo")
+    store.set_embedding(\n        memory_id, vectors[0], tenant_id="demo",\n        provider=provider.model_info.provider, model=provider.model_info.model,\n    )
     print(store.search_vector(vectors[0], tenant_id="demo"))
 ```
 
