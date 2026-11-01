@@ -17,6 +17,7 @@ class InfinityDB {
   constructor(options = {}) {
     this.options = options;
     this._seq = 0;
+    this._lastTimestamp = 0;
     this._storage = null;
     if (options.dbPath) {
       const Database = require("better-sqlite3");
@@ -109,6 +110,9 @@ class InfinityDB {
     this.proofs = new Map(get("SELECT atom_id AS id, payload FROM l6_proofs", "id"));
     this.legacyMemories = new Map(get("SELECT memory_key AS id, payload FROM legacy_memories", "id"));
     this.relations = this._storage.prepare("SELECT old_atom_id AS oldAtomId, new_atom_id AS newAtomId, user_id AS userId, relation, created_at AS createdAt FROM l1_atom_relations").all();
+    this._lastTimestamp = this.atoms.size
+      ? Math.max(this._lastTimestamp, ...Array.from(this.atoms.values(), atom => atom.ts))
+      : this._lastTimestamp;
   }
 
   _refreshState() {
@@ -194,7 +198,8 @@ class InfinityDB {
     if (importance < 0 || importance > 1) {
       throw new RangeError("importance must be between 0 and 1");
     }
-    const now = Date.now() / 1000;
+    const now = Math.max(Date.now() / 1000, this._lastTimestamp + 0.001);
+    this._lastTimestamp = now;
     this._allocateSequence();
     const logId = `L0_${this._sha256(conversation + now + this._seq).slice(0, 16)}`;
 
