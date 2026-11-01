@@ -63,12 +63,12 @@ class InfinityDB {
             if (row.schema_version !== 1) throw new Error(`Unsupported InfinityDB storage schema version: ${row.schema_version}`);
             const state = JSON.parse(row.payload);
             this._seq = state.seq || 0;
-            this._writeEntries("l0_logs", "id", state.logs || [], v => [v.id, v.userId, JSON.stringify(v)]);
-            this._writeEntries("l1_atoms", "id", state.atoms || [], v => [v.id, v.userId, v.sourceId, v.fact, v.ts, JSON.stringify(v)]);
-            this._writeEntries("l2_episodes", "id", state.episodes || [], v => [v.id, v.userId, v.sourceId, JSON.stringify(v)]);
-            this._writeEntries("l3_personas", "id", state.personas || [], v => [v[0], v[1].userId, JSON.stringify(v[1])]);
-            this._writeEntries("l4_policies", "id", state.policies || [], v => [v.id, JSON.stringify(v)]);
-            this._writeEntries("l6_proofs", "atom_id", state.proofs || [], v => [v.atomId, v.sourceLogId, JSON.stringify(v)]);
+            this._writeEntries("l0_logs", "id", state.logs || [], entry => [entry[1].id, entry[1].userId, JSON.stringify(entry[1])]);
+            this._writeEntries("l1_atoms", "id", state.atoms || [], entry => [entry[1].id, entry[1].userId, entry[1].sourceId, entry[1].fact, entry[1].ts, JSON.stringify(entry[1])]);
+            this._writeEntries("l2_episodes", "id", state.episodes || [], entry => [entry[1].id, entry[1].userId, entry[1].sourceId, JSON.stringify(entry[1])]);
+            this._writeEntries("l3_personas", "id", state.personas || [], entry => [entry[0], entry[1].userId, JSON.stringify(entry[1])]);
+            this._writeEntries("l4_policies", "id", state.policies || [], entry => [entry[1].id, JSON.stringify(entry[1])]);
+            this._writeEntries("l6_proofs", "atom_id", state.proofs || [], entry => [entry[1].atomId, entry[1].sourceLogId, JSON.stringify(entry[1])]);
             this._writeEntries("legacy_memories", "memory_key", state.legacyMemories || [], v => [v[0], JSON.stringify(v[1])]);
           }
           this._storage.exec("DROP TABLE infinitydb_state");
