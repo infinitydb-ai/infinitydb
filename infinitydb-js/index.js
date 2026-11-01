@@ -16,6 +16,7 @@ const crypto = require("crypto");
 class InfinityDB {
   constructor(options = {}) {
     this.options = options;
+    this._seq = 0;
     this.logs = new Map(); // L0: id -> { id, userId, sessionId, raw, ts }
     this.atoms = new Map(); // L1: id -> { id, userId, fact, category, sourceId, importance, accessCount, ts }
     this.episodes = new Map(); // L2: id -> { id, userId, cause, effect, relation, sourceId, ts }
@@ -49,8 +50,21 @@ class InfinityDB {
 
   // Core L0-L6 API
   add(conversation, userId = "default", sessionId = null, importance = 0.9) {
+    if (typeof conversation !== "string" || !conversation.trim()) {
+      throw new TypeError("conversation must be a non-empty string");
+    }
+    if (typeof userId !== "string" || !userId.trim()) {
+      throw new TypeError("userId must be a non-empty string");
+    }
+    if (typeof importance !== "number" || !Number.isFinite(importance)) {
+      throw new TypeError("importance must be a finite number between 0 and 1");
+    }
+    if (importance < 0 || importance > 1) {
+      throw new RangeError("importance must be between 0 and 1");
+    }
     const now = Date.now() / 1000;
-    const logId = `L0_${this._sha256(conversation + now).slice(0, 16)}`;
+    this._seq += 1;
+    const logId = `L0_${this._sha256(conversation + now + this._seq).slice(0, 16)}`;
 
     // L0: Store raw
     this.logs.set(logId, {
@@ -88,7 +102,7 @@ class InfinityDB {
           fact,
           category: pat.cat,
           sourceId: logId,
-          importance: pat.weight,
+          importance: pat.weight * importance,
           accessCount: 0,
           ts: now,
         });
@@ -132,7 +146,7 @@ class InfinityDB {
           fact: s,
           category: "general",
           sourceId: logId,
-          importance: 0.75,
+          importance: 0.75 * importance,
           accessCount: 0,
           ts: now,
         });
@@ -170,13 +184,31 @@ class InfinityDB {
   }
 
   recall(query, options = {}) {
+    if (typeof query !== "string") throw new TypeError("query must be a string");
+    const n = options.n === undefined ? 5 : options.n;
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new RangeError("n must be a positive integer");
+    }
+    if (options.userId !== undefined &&
+        (typeof options.userId !== "string" || !options.userId.trim())) {
+      throw new TypeError("userId must be a non-empty string");
+    }
     const start = performance.now();
-    const n = options.n || 5;
     const userId = options.userId || null;
     const now = Date.now() / 1000;
     const qTerms = (query.toLowerCase().match(/\w+/g) || []).filter(t => t.length > 1);
 
     const scored = [];
+    if (qTerms.length === 0) {
+      return {
+        results: [],
+        causalGraph: [],
+        policies: [],
+        latencyMs: Math.round((performance.now() - start) * 100) / 100,
+        tokensSaved: null,
+        proofAvailable: false,
+      };
+    }
     for (const [id, atom] of this.atoms.entries()) {
       if (userId && atom.userId !== userId) continue;
       const factLower = atom.fact.toLowerCase();
@@ -194,7 +226,7 @@ class InfinityDB {
       const retention = Math.exp(-deltaDays / Math.max(stability, 0.1));
       const totalScore = (termScore + atom.importance * 1.5) * retention;
 
-      if (termMatches > 0 || totalScore > 0.5) {
+      if (termMatches > 0) {
         scored.push({
           id: atom.id,
           fact: atom.fact,
@@ -237,7 +269,7 @@ class InfinityDB {
       causalGraph,
       policies,
       latencyMs: Math.round(elapsedMs * 100) / 100,
-      tokensSaved: "81.4%",
+      tokensSaved: null,
       proofAvailable: true,
     };
   }
@@ -245,13 +277,28 @@ class InfinityDB {
   getProof(atomId) {
     const p = this.proofs.get(atomId);
     if (!p) return null;
+    const source = this.logs.get(p.sourceLogId);
+    const atom = this.atoms.get(atomId);
+    let verified = false;
+    if (source && atom &&
+        Number.isInteger(p.charStart) && Number.isInteger(p.charEnd) &&
+        p.charStart >= 0 && p.charEnd >= p.charStart &&
+        p.charEnd <= source.raw.length) {
+      const sourceFact = source.raw.slice(p.charStart, p.charEnd);
+      const expected = this._sha256(atom.fact + p.sourceLogId);
+      const actualBuffer = Buffer.from(p.hash, "hex");
+      const expectedBuffer = Buffer.from(expected, "hex");
+      verified = sourceFact === atom.fact &&
+        actualBuffer.length === expectedBuffer.length &&
+        crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+    }
     return {
       atomId: p.atomId,
       hash: p.hash,
       sourceLogId: p.sourceLogId,
       rawSnippet: p.rawSnippet,
       charRange: [p.charStart, p.charEnd],
-      verified: true,
+      verified,
       timestamp: p.ts,
     };
   }
