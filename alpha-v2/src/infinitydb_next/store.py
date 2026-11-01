@@ -151,6 +151,59 @@ class MemoryStore:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
         return mid
 
+    def supersede_memory(
+        self, memory_id: str, new_content: str, *,
+        tenant_id: str = "default", kind: str = "fact",
+        metadata: dict[str, Any] | None = None, source_id: str | None = None,
+        raw_evidence: str | None = None, confidence: float = 1.0,
+        at: float | None = None,
+    ) -> str:
+        """Atomically close an active memory and create its explicit successor.
+
+        The old record remains queryable before its valid_to boundary. The new
+        record starts at that same boundary and is linked by a 'supersedes' edge.
+        """
+        if not new_content or not new_content.strip():
+            raise ValueError("new_content must not be empty")
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError("confidence must be between 0 and 1")
+        timestamp = time.time() if at is None else float(at)
+        if not math.isfinite(timestamp):
+            raise ValueError("at must be a finite timestamp")
+        new_id = str(uuid.uuid4())
+        digest = hashlib.sha256(new_content.encode()).hexdigest()
+        now = time.time()
+        with self._lock, self.db:
+            previous = self.db.execute(
+                "SELECT valid_from,valid_to FROM memories WHERE id=? AND tenant_id=?",
+                (memory_id, tenant_id),
+            ).fetchone()
+            if previous is None:
+                raise ValueError("memory does not exist in the specified tenant")
+            if previous["valid_to"] is not None:
+                raise ValueError("memory is already superseded or expired")
+            if timestamp < previous["valid_from"]:
+                raise ValueError("supersession time cannot precede the memory valid_from")
+            self.db.execute(
+                "UPDATE memories SET valid_to=? WHERE id=? AND tenant_id=? AND valid_to IS NULL",
+                (timestamp, memory_id, tenant_id),
+            )
+            self.db.execute(
+                "INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id, tenant_id, kind, new_content, now, timestamp, None,
+                 json.dumps(metadata or {}, sort_keys=True), source_id, confidence, digest),
+            )
+            self.db.execute(
+                "INSERT INTO edges(tenant_id,src_id,dst_id,relation,weight) VALUES(?,?,?,?,?)",
+                (tenant_id, memory_id, new_id, "supersedes", 1.0),
+            )
+            if self._fts:
+                self.db.execute("INSERT INTO memory_fts_v2 VALUES(?,?,?)",
+                                (new_id, self._tenant_key(tenant_id), new_content))
+            if raw_evidence is not None:
+                self._append_evidence(tenant_id, new_id, raw_evidence, now)
+        return new_id
+
     def add_memories(self, items: Iterable[dict[str, Any]]) -> list[str]:
         now = time.time()
         prepared: list[tuple[Any, ...]] = []
