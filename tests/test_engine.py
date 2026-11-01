@@ -606,3 +606,32 @@ def test_shared_policy_conformance_fixture():
     assert rules() == fixture["expected"]["unscoped"]
     db.delete_user(fixture["tenant_a"])
     assert rules(fixture["tenant_a"]) == fixture["expected"]["tenant_a_after_delete"]
+
+
+def test_shared_temporal_conformance_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "sdk_policy_conformance.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    temporal = fixture["temporal"]
+    db = InfinityDB()
+    old_log = db.add(temporal["old_fact"], user_id=temporal["user_id"])
+    old_atom = db.conn.execute(
+        "SELECT id, ts FROM l1_atoms WHERE source_id = ?", (old_log,)
+    ).fetchone()
+    historical_cutoff = old_atom["ts"] + 0.000001
+
+    new_log = db.add(temporal["new_fact"], user_id=temporal["user_id"])
+    new_atom = db.conn.execute(
+        "SELECT id FROM l1_atoms WHERE source_id = ?", (new_log,)
+    ).fetchone()
+    db.supersede_fact(old_atom["id"], new_atom["id"], temporal["user_id"])
+
+    current = db.recall(temporal["query"], user_id=temporal["user_id"])
+    historical = db.recall(
+        temporal["query"], user_id=temporal["user_id"], as_of=historical_cutoff
+    )
+    assert len(current["results"]) == 1
+    assert temporal["expected_current_fact"] in current["results"][0]["fact"]
+    assert len(historical["results"]) == 1
+    assert temporal["expected_historical_fact"] in historical["results"][0]["fact"]
+    assert db.get_proof(old_atom["id"])["verified"] is True
+    db.conn.close()
