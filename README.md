@@ -36,7 +36,7 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 *   **Zero-LLM Fact Extraction:** L1 Atomic Facts are parsed with high-speed deterministic rules in under 10ms with zero token cost.
 *   **Dynamic Persona & Conflict Auto-Resolution:** When preferences evolve, InfinityDB auto-resolves conflicts by timestamp provenance instead of accumulating contradictory vectors.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
-*   **Enterprise Guardrails (L4 Policies):** Injects corporate SOPs, regulatory constraints, and security guardrails directly into recall context.
+*   **Tenant-Scoped Guardrails (L4 Policies):** Combines global baseline policies with tenant-specific SOPs; a tenant's private policies are excluded from other tenants' recall.
 *   **Indexed Hybrid Retrieval:** SQLite FTS5 narrows keyword candidates; importance weighting and Ebbinghaus time-decay rank the retrieved facts. Latency depends on dataset, hardware, and workload.
 
 ---

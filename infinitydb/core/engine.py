@@ -139,7 +139,8 @@ class InfinityDB:
                 rule TEXT NOT NULL,
                 domain TEXT NOT NULL,
                 priority REAL NOT NULL,
-                created_at REAL NOT NULL
+                created_at REAL NOT NULL,
+                tenant_id TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_l4_domain ON l4_policies(domain);
 
@@ -155,6 +156,17 @@ class InfinityDB:
             );
             """
         )
+        # Migrate existing L4 policy tables without changing legacy global policies.
+        policy_columns = {
+            row["name"] for row in self.conn.execute("PRAGMA table_info(l4_policies)")
+        }
+        if "tenant_id" not in policy_columns:
+            self.conn.execute("ALTER TABLE l4_policies ADD COLUMN tenant_id TEXT")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_l4_tenant_priority "
+            "ON l4_policies(tenant_id, priority DESC)"
+        )
+
         # Build the FTS index once for databases created before FTS was introduced.
         # Triggers maintain it transactionally for all subsequent writes/deletes.
         fts_version = self.conn.execute(
@@ -469,7 +481,18 @@ class InfinityDB:
         # Check L4 Enterprise Policies if requested
         relevant_policies = []
         if include_policies:
-            p_cur = self.conn.execute("SELECT id, rule, domain, priority FROM l4_policies ORDER BY priority DESC LIMIT 3")
+            if user_id is None:
+                p_cur = self.conn.execute(
+                    "SELECT id, rule, domain, priority FROM l4_policies "
+                    "WHERE tenant_id IS NULL ORDER BY priority DESC LIMIT 3"
+                )
+            else:
+                p_cur = self.conn.execute(
+                    "SELECT id, rule, domain, priority FROM l4_policies "
+                    "WHERE tenant_id IS NULL OR tenant_id = ? "
+                    "ORDER BY priority DESC LIMIT 3",
+                    (user_id,),
+                )
             for p_row in p_cur.fetchall():
                 relevant_policies.append({
                     "id": p_row["id"],
@@ -536,12 +559,40 @@ class InfinityDB:
         )
         return {row["key"]: row["value"] for row in cur.fetchall()}
 
-    def add_policy(self, rule: str, domain: str = "general", priority: float = 1.0) -> str:
-        """L4 Policy Engine: Register enterprise compliance rule or agent SOP."""
-        pid = f"L4_{self._sha256(rule + domain)[:12]}"
+    def add_policy(
+        self,
+        rule: str,
+        domain: str = "general",
+        priority: float = 1.0,
+        tenant_id: str | None = None,
+    ) -> str:
+        """Register a global policy or one scoped to a single tenant.
+
+        Global policies (tenant_id=None) remain visible to every tenant.
+        Tenant-scoped policies are returned only to the matching tenant.
+        """
+        if not isinstance(rule, str) or not rule.strip():
+            raise ValueError("rule cannot be empty")
+        if not isinstance(domain, str) or not domain.strip():
+            raise ValueError("domain cannot be empty")
+        if not isinstance(priority, (int, float)) or isinstance(priority, bool):
+            raise TypeError("priority must be a number")
+        if not math.isfinite(float(priority)):
+            raise ValueError("priority must be finite")
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            raise ValueError("tenant_id cannot be empty")
+
+        scope = tenant_id or "global"
+        pid = f"L4_{self._sha256(rule + domain + scope)[:16]}"
         self.conn.execute(
-            "INSERT OR REPLACE INTO l4_policies VALUES (?, ?, ?, ?, ?)",
-            (pid, rule, domain, priority, time.time()),
+            """
+            INSERT OR REPLACE INTO l4_policies
+            (id, rule, domain, priority, created_at, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (pid, rule.strip(), domain.strip(), float(priority), time.time(), tenant_id),
         )
         self.conn.commit()
         return pid
@@ -577,12 +628,16 @@ class InfinityDB:
         c0 = self.conn.execute("DELETE FROM l0_logs WHERE user_id = ?", (user_id,)).rowcount
         c2 = self.conn.execute("DELETE FROM l2_episodes WHERE user_id = ?", (user_id,)).rowcount
         c3 = self.conn.execute("DELETE FROM l3_persona WHERE user_id = ?", (user_id,)).rowcount
+        c4 = self.conn.execute(
+            "DELETE FROM l4_policies WHERE tenant_id = ?", (user_id,)
+        ).rowcount
         self.conn.commit()
         return {
             "l0_logs_deleted": c0,
             "l1_atoms_deleted": c1,
             "l2_episodes_deleted": c2,
             "l3_persona_deleted": c3,
+            "l4_tenant_policies_deleted": c4,
             "gdpr_compliant": True,
         }
 
