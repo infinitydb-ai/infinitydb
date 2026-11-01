@@ -106,11 +106,12 @@ console.log(proof);
 ### 5. Enterprise Policies & Guardrails
 
 ```javascript
-// Register policies that automatically govern recalls
+// Register a global policy or a tenant-scoped policy
 db.addPolicy("Never log plaintext passwords or API keys", "security", 2.0);
+db.addPolicy("Tenant-specific retention rule", "retention", 1.5, "usr_sarah");
 
 const recall = db.recall("database credentials", { userId: "usr_sarah" });
-console.log(recall.policies); // Injected active governance policies
+console.log(recall.policies); // Global + usr_sarah policies only
 ```
 
 ### 6. Tenant data deletion
