@@ -153,7 +153,36 @@ def test_gdpr_delete_user():
     assert len(eve_res["results"]) > 0
 
 def test_add_smoke():
-    pass
+    """Verify a plain conversation traverses L0, fallback L1 extraction, and L6 proof."""
+    db = InfinityDB()
+    conversation = "The deployment pipeline uses isolated build workers."
+    log_id = db.add(
+        conversation,
+        user_id="smoke-tenant",
+        session_id="smoke-session",
+    )
+
+    log = db.conn.execute(
+        "SELECT user_id, session_id, raw FROM l0_logs WHERE id = ?",
+        (log_id,),
+    ).fetchone()
+    assert log is not None
+    assert tuple(log) == (
+        "smoke-tenant", "smoke-session", conversation
+    )
+
+    atom = db.conn.execute(
+        "SELECT id, fact, category, source_id FROM l1_atoms WHERE source_id = ?",
+        (log_id,),
+    ).fetchone()
+    assert atom is not None
+    assert atom["fact"] == conversation
+    assert atom["category"] == "general"
+
+    proof = db.get_proof(atom["id"])
+    assert proof is not None
+    assert proof["source_log_id"] == log_id
+    assert proof["verified"] is True
 
 
 def test_proof_verification_detects_source_tampering():
