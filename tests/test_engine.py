@@ -444,3 +444,60 @@ def test_add_rolls_back_all_memory_layers_when_ingestion_fails():
         "SELECT count(*) FROM l0_logs WHERE user_id = ?", ("atomic-user",)
     ).fetchone()[0] == 1
 
+def test_delete_user_handles_more_atoms_than_sqlite_parameter_limit():
+    """Tenant deletion uses a subquery rather than one placeholder per atom."""
+    db = InfinityDB()
+    user_id = "large-delete-tenant"
+    now = time.time()
+    rows = [
+        (f"bulk-atom-{i}", user_id, f"fact number {i}", "general",
+         f"bulk-log-{i}", 0.5, 0, now)
+        for i in range(1200)
+    ]
+    db.conn.executemany(
+        """INSERT INTO l1_atoms
+           (id, user_id, fact, category, source_id, importance, access_count, ts)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    db.conn.executemany(
+        """INSERT INTO l6_proof
+           (atom_id, hash, source_log_id, raw_snippet, char_start, char_end, ts)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (row[0], "0" * 64, row[4], row[2], 0, len(row[2]), now)
+            for row in rows
+        ],
+    )
+    db.conn.commit()
+
+    result = db.delete_user(user_id)
+    assert result["l1_atoms_deleted"] == 1200
+    assert db.conn.execute(
+        "SELECT count(*) FROM l6_proof WHERE atom_id LIKE 'bulk-atom-%'"
+    ).fetchone()[0] == 0
+
+
+def test_delete_user_rolls_back_all_layers_if_a_delete_fails():
+    db = InfinityDB()
+    db.add("I prefer Python for analytics.", user_id="rollback-delete")
+    db.conn.execute(
+        """CREATE TRIGGER reject_atom_delete BEFORE DELETE ON l1_atoms
+           WHEN OLD.user_id = 'rollback-delete'
+           BEGIN SELECT RAISE(ABORT, 'simulated delete failure'); END"""
+    )
+    db.conn.commit()
+
+    with pytest.raises(Exception, match="simulated delete failure"):
+        db.delete_user("rollback-delete")
+
+    assert db.conn.execute(
+        "SELECT count(*) FROM l0_logs WHERE user_id = ?", ("rollback-delete",)
+    ).fetchone()[0] == 1
+    assert db.conn.execute(
+        "SELECT count(*) FROM l1_atoms WHERE user_id = ?", ("rollback-delete",)
+    ).fetchone()[0] >= 1
+    assert db.conn.execute(
+        "SELECT count(*) FROM l6_proof"
+    ).fetchone()[0] >= 1
+
