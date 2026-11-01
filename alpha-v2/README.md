@@ -122,3 +122,15 @@ explainable memory-ID path, relation sequence and multiplicative edge score.
 Optional relation and valid-time filters are applied during traversal. The
 default is a two-hop bounded traversal; this is a graph expansion primitive,
 not a claim of learned relevance ranking. Cycles are guarded by a visited set.
+
+
+### Temporal fact supersession
+
+Use `MemoryStore.supersede_memory(memory_id, new_content, tenant_id=...)`
+when a fact is explicitly replaced. The operation atomically sets the old
+record's `valid_to`, creates the successor at the same valid-time boundary,
+and adds a tenant-local `supersedes` edge. Historical queries before the
+boundary can still retrieve the old fact; queries at or after it see the
+successor. The original evidence remains intact, and optional new evidence is
+attached to the successor. This is explicit versioning, not automatic
+contradiction detection: callers decide when two facts conflict.
