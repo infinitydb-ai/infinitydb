@@ -32,3 +32,12 @@ class ContextPack:
     evidence_ids: list[str]
     estimated_tokens: int
     generated_at: float
+
+
+@dataclass(slots=True)
+class GraphHit:
+    memory: Memory
+    depth: int
+    path: list[str]
+    relations: list[str]
+    score: float
