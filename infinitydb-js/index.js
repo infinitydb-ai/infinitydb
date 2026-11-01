@@ -640,26 +640,31 @@ class InfinityDB {
   deleteUser(userId) {
     this._refreshState();
     let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
-    for (const [id, log] of Array.from(this.logs.entries())) {
-      if (log.userId === userId) { this.logs.delete(id); c0++; }
+    const logIds = [];
+    const atomIds = [];
+    const episodeIds = [];
+    const personaKeys = [];
+    const policyIds = [];
+
+    for (const [id, log] of this.logs.entries()) {
+      if (log.userId === userId) { logIds.push(id); c0++; }
     }
-    this.relations = this.relations.filter(r => r.userId !== userId);
-    for (const [id, atom] of Array.from(this.atoms.entries())) {
-      if (atom.userId === userId) {
-        this.atoms.delete(id);
-        this.proofs.delete(id);
-        c1++;
-      }
+    for (const [id, atom] of this.atoms.entries()) {
+      if (atom.userId === userId) { atomIds.push(id); c1++; }
     }
-    for (const [id, policy] of Array.from(this.policies.entries())) {
-      if (policy.tenantId === userId) this.policies.delete(id);
+    for (const [id, ep] of this.episodes.entries()) {
+      if (ep.userId === userId) { episodeIds.push(id); c2++; }
     }
-    for (const [id, ep] of Array.from(this.episodes.entries())) {
-      if (ep.userId === userId) { this.episodes.delete(id); c2++; }
+    for (const [key, persona] of this.personas.entries()) {
+      if (persona.userId === userId) { personaKeys.push(key); c3++; }
     }
-    for (const [key, p] of Array.from(this.personas.entries())) {
-      if (p.userId === userId) { this.personas.delete(key); c3++; }
+    for (const [id, policy] of this.policies.entries()) {
+      if (policy.tenantId === userId) policyIds.push(id);
     }
+
+    // Commit durable deletion before mutating the in-memory view. If SQLite
+    // rejects any statement, the transaction rolls back and this instance
+    // continues to expose the unchanged tenant state.
     if (this._storage) {
       this._storage.transaction(() => {
         this._storage.prepare("DELETE FROM l0_logs WHERE user_id=?").run(userId);
@@ -667,15 +672,28 @@ class InfinityDB {
         this._storage.prepare("DELETE FROM l1_atoms WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l2_episodes WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l3_personas WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l4_policies WHERE tenant_id=?").run(userId);
         this._storage.prepare("DELETE FROM l6_proofs WHERE source_log_id NOT IN (SELECT id FROM l0_logs)").run();
       })();
     }
+
+    for (const id of logIds) this.logs.delete(id);
+    for (const id of atomIds) {
+      this.atoms.delete(id);
+      this.proofs.delete(id);
+    }
+    for (const id of episodeIds) this.episodes.delete(id);
+    for (const key of personaKeys) this.personas.delete(key);
+    for (const id of policyIds) this.policies.delete(id);
+    this.relations = this.relations.filter(r => r.userId !== userId);
+
     this._persist();
     return {
       l0LogsDeleted: c0,
       l1AtomsDeleted: c1,
       l2EpisodesDeleted: c2,
       l3PersonaDeleted: c3,
+      l4TenantPoliciesDeleted: policyIds.length,
     };
   }
 
