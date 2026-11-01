@@ -188,3 +188,42 @@ def test_vector_embeddings_persist_after_reopen():
             assert hits[0].memory.id == memory_id
         finally:
             reopened.close()
+
+
+def test_hybrid_search_fuses_lexical_and_vector_rankings(store):
+    lexical = store.add_memory("alpha lexical retrieval result", tenant_id="tenant-a")
+    semantic = store.add_memory("unrelated wording", tenant_id="tenant-a")
+    foreign = store.add_memory("alpha lexical retrieval result", tenant_id="tenant-b")
+    store.set_embedding(lexical, [0.0, 1.0], tenant_id="tenant-a")
+    store.set_embedding(semantic, [1.0, 0.0], tenant_id="tenant-a")
+    store.set_embedding(foreign, [1.0, 0.0], tenant_id="tenant-b")
+
+    hits = store.search_hybrid(
+        "alpha lexical", [1.0, 0.0], tenant_id="tenant-a", limit=10
+    )
+    by_id = {hit.memory.id: hit for hit in hits}
+    assert set(by_id) == {lexical, semantic}
+    assert by_id[lexical].matched_by == ["exact_vector", "fts5_and"]
+    assert by_id[semantic].matched_by == ["exact_vector"]
+    assert foreign not in by_id
+
+
+def test_hybrid_search_applies_temporal_and_kind_filters_to_both_channels(store):
+    expired_at = time.time()
+    store.add_memory(
+        "expired lexical semantic", kind="fact",
+        valid_from=expired_at - 20, valid_to=expired_at - 1,
+    )
+    current = store.add_memory("current lexical semantic", kind="episode")
+    store.set_embedding(current, [1.0, 0.0])
+    hits = store.search_hybrid(
+        "current lexical", [1.0, 0.0], kinds=["episode"], as_of=time.time()
+    )
+    assert [hit.memory.id for hit in hits] == [current]
+
+
+def test_hybrid_search_validates_fusion_parameters(store):
+    with pytest.raises(ValueError, match="rrf_k"):
+        store.search_hybrid("query", [1.0, 0.0], rrf_k=0)
+    with pytest.raises(ValueError, match="candidate_limit"):
+        store.search_hybrid("query", [1.0, 0.0], limit=5, candidate_limit=2)
