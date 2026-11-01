@@ -303,3 +303,22 @@ assert.deepStrictEqual(policyRules(), policyFixture.expected.unscoped);
 conformanceDb.deleteUser(policyFixture.tenant_a);
 assert.deepStrictEqual(policyRules(policyFixture.tenant_a), policyFixture.expected.tenant_a_after_delete);
 conformanceDb.close();
+
+
+// Shared temporal behavior fixture: current recall, historical recall, and proof preservation.
+const sharedTemporal = policyFixture.temporal;
+const sharedTemporalDb = new InfinityDB();
+const sharedOldLog = sharedTemporalDb.add(sharedTemporal.old_fact, sharedTemporal.user_id);
+const sharedOldAtom = Array.from(sharedTemporalDb.atoms.values()).find(a => a.sourceId === sharedOldLog);
+const sharedHistoricalCutoff = sharedOldAtom.ts + 0.000001;
+const sharedNewLog = sharedTemporalDb.add(sharedTemporal.new_fact, sharedTemporal.user_id);
+const sharedNewAtom = Array.from(sharedTemporalDb.atoms.values()).find(a => a.sourceId === sharedNewLog);
+sharedTemporalDb.supersedeFact(sharedOldAtom.id, sharedNewAtom.id, sharedTemporal.user_id);
+const sharedCurrent = sharedTemporalDb.recall(sharedTemporal.query, { userId: sharedTemporal.user_id });
+const sharedHistorical = sharedTemporalDb.recall(sharedTemporal.query, { userId: sharedTemporal.user_id, asOf: sharedHistoricalCutoff });
+assert.strictEqual(sharedCurrent.results.length, 1);
+assert.ok(sharedCurrent.results[0].fact.includes(sharedTemporal.expected_current_fact));
+assert.strictEqual(sharedHistorical.results.length, 1);
+assert.ok(sharedHistorical.results[0].fact.includes(sharedTemporal.expected_historical_fact));
+assert.strictEqual(sharedTemporalDb.getProof(sharedOldAtom.id).verified, true);
+sharedTemporalDb.close();
