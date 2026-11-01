@@ -423,3 +423,42 @@ assert.strictEqual(deleteRollbackReopened.atoms.size, 0);
 assert.strictEqual(deleteRollbackReopened.policies.size, 0);
 deleteRollbackReopened.close();
 fs.rmSync(deleteRollbackDir, { recursive: true, force: true });
+
+
+// A refresh must observe one SQLite snapshot even if another connection commits mid-load.
+const snapshotDir = fs.mkdtempSync(path.join(require("os").tmpdir(), "infinitydb-snapshot-"));
+const snapshotPath = path.join(snapshotDir, "snapshot.db");
+const snapshotWriter = new InfinityDB({ dbPath: snapshotPath });
+const snapshotReader = new InfinityDB({ dbPath: snapshotPath });
+const originalPrepare = snapshotReader._storage.prepare.bind(snapshotReader._storage);
+let injectedWrite = false;
+snapshotReader._storage.prepare = (sql) => {
+  const statement = originalPrepare(sql);
+  if (sql === "SELECT id, payload FROM l0_logs") {
+    return {
+      ...statement,
+      all: (...args) => {
+        const rows = statement.all(...args);
+        if (!injectedWrite) {
+          injectedWrite = true;
+          snapshotWriter.add("I prefer a consistent snapshot", "snapshot_tenant");
+        }
+        return rows;
+      },
+    };
+  }
+  return statement;
+};
+snapshotReader._refreshState();
+assert.strictEqual(injectedWrite, true);
+assert.strictEqual(snapshotWriter.logs.size, 1);
+assert.strictEqual(snapshotWriter.atoms.size, 1);
+assert.strictEqual(snapshotReader.logs.size, 0);
+assert.strictEqual(snapshotReader.atoms.size, 0);
+snapshotReader._storage.prepare = originalPrepare;
+snapshotReader._refreshState();
+assert.strictEqual(snapshotReader.logs.size, 1);
+assert.strictEqual(snapshotReader.atoms.size, 1);
+snapshotReader.close();
+snapshotWriter.close();
+fs.rmSync(snapshotDir, { recursive: true, force: true });
