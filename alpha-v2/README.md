@@ -111,3 +111,14 @@ rows and survive database reopen. Use a new `model_revision` or
 The cache stores hashes and vectors, not a second copy of raw content.
 Concurrent writers may both compute the same cache miss; SQLite uniqueness
 keeps one cache row, but provider calls are not single-flight coordinated.
+
+
+### Bounded graph retrieval
+
+`MemoryStore.traverse_graph(seed_ids, tenant_id=..., max_hops=2)` performs
+tenant-scoped breadth-first traversal over graph edges in either direction.
+It returns each reachable memory once, at its shortest hop distance, with an
+explainable memory-ID path, relation sequence and multiplicative edge score.
+Optional relation and valid-time filters are applied during traversal. The
+default is a two-hop bounded traversal; this is a graph expansion primitive,
+not a claim of learned relevance ranking. Cycles are guarded by a visited set.
