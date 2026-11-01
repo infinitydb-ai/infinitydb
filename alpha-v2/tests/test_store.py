@@ -95,3 +95,34 @@ def test_edges_reject_empty_relation(store):
     with pytest.raises(ValueError, match="relation must not be empty"):
         store.add_edge(source, destination, " ")
     assert store.stats()["edges"] == 0
+
+
+def test_reopen_repairs_partial_fts_index():
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "repair.sqlite"
+        first = MemoryStore(database)
+        present_id = first.add_memory(
+            "rebuildable tenant search phrase", tenant_id="tenant-a"
+        )
+        missing_id = first.add_memory(
+            "recover missing index entry", tenant_id="tenant-b"
+        )
+        first.db.execute(
+            "DELETE FROM memory_fts_v2 WHERE memory_id=?", (missing_id,)
+        )
+        first.db.commit()
+        first.close()
+
+        reopened = MemoryStore(database)
+        try:
+            assert reopened.search(
+                "recover missing", tenant_id="tenant-b"
+            )[0].memory.id == missing_id
+            assert reopened.search(
+                "rebuildable tenant", tenant_id="tenant-a"
+            )[0].memory.id == present_id
+            assert reopened.db.execute(
+                "SELECT count(*) FROM memory_fts_v2"
+            ).fetchone()[0] == 2
+        finally:
+            reopened.close()

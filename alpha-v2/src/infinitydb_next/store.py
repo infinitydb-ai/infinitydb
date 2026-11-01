@@ -62,14 +62,18 @@ class MemoryStore:
         try:
             self.db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_v2
                 USING fts5(memory_id UNINDEXED, tenant_key, content, tokenize='unicode61')""")
-            count = self.db.execute("SELECT count(*) FROM memory_fts_v2").fetchone()[0]
-            if count == 0:
-                rows = self.db.execute("SELECT id,tenant_id,content FROM memories").fetchall()
+            # The memories table is canonical. Rebuild the derived FTS index on
+            # open so partial/stale indexes from interrupted older versions recover.
+            with self.db:
+                self.db.execute("DELETE FROM memory_fts_v2")
+                rows = self.db.execute(
+                    "SELECT id,tenant_id,content FROM memories ORDER BY rowid"
+                ).fetchall()
                 self.db.executemany(
                     "INSERT INTO memory_fts_v2 VALUES(?,?,?)",
-                    [(r["id"], self._tenant_key(r["tenant_id"]), r["content"]) for r in rows],
+                    [(row["id"], self._tenant_key(row["tenant_id"]), row["content"])
+                     for row in rows],
                 )
-            self.db.commit()
             return True
         except sqlite3.OperationalError:
             return False
