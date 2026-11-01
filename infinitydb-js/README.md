@@ -65,7 +65,28 @@ console.log(db.getPersona("usr_sarah"));
 // => { preference: ["Rust for mission-critical core engines"] }
 ```
 
-### 3. Cryptographic Audit Proofs (SHA-256 Chain)
+### 3. Explicit temporal supersession and historical recall
+
+When a user explicitly replaces a fact, preserve the original fact and its provenance while marking the newer fact as its successor:
+
+```javascript
+const oldLog = db.add("I prefer Python for data work.", "usr_sarah");
+const oldFact = Array.from(db.atoms.values()).find(a => a.sourceId === oldLog);
+const cutoff = oldFact.ts + 0.001;
+
+const newLog = db.add("I prefer Rust for systems work.", "usr_sarah");
+const newFact = Array.from(db.atoms.values()).find(a => a.sourceId === newLog);
+
+db.supersedeFact(oldFact.id, newFact.id, "usr_sarah");
+
+// Current recall returns the active fact; historical recall can still see the old one.
+db.recall("Python", { userId: "usr_sarah" }).results; // []
+db.recall("Python", { userId: "usr_sarah", asOf: cutoff }).results;
+```
+
+Supersession is explicit; the SDK does not infer semantic contradictions. Both facts and their proof records remain stored. Relations are tenant-scoped and cycle-checked. SQLite mode persists relations across reopen.
+
+### 4. Cryptographic Audit Proofs (SHA-256 Chain)
 
 Every atomic fact is hashed and anchored into an immutable tamper-evident proof chain:
 
@@ -82,7 +103,7 @@ console.log(proof);
 // }
 ```
 
-### 4. Enterprise Policies & Guardrails
+### 5. Enterprise Policies & Guardrails
 
 ```javascript
 // Register policies that automatically govern recalls
@@ -92,7 +113,7 @@ const recall = db.recall("database credentials", { userId: "usr_sarah" });
 console.log(recall.policies); // Injected active governance policies
 ```
 
-### 5. GDPR Right-to-be-Forgotten Compliance
+### 6. GDPR Right-to-be-Forgotten Compliance
 
 ```javascript
 // Instantly and irreversibly wipe all user logs, facts, and persona state
@@ -100,7 +121,7 @@ const result = db.deleteUser("usr_sarah");
 console.log(result.gdprCompliant); // true
 ```
 
-### 6. Backwards-Compatible Key-Value Store
+### 7. Backwards-Compatible Key-Value Store
 
 ```javascript
 db.put("session:123", "active");
@@ -109,7 +130,7 @@ db.delete("session:123");
 ```
 
 
-### 7. Durable SQLite storage (Node.js)
+### 8. Durable SQLite storage (Node.js)
 
 Install the package dependencies, then provide a database path to enable durable storage:
 
