@@ -168,4 +168,39 @@ try {
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
+
+// 12. Temporal supersession and historical recall (in-memory).
+const temporal = new InfinityDB();
+const oldLog = temporal.add("I prefer Python for data engineering.", "temporal_user");
+const oldFact = Array.from(temporal.atoms.values()).find(a => a.sourceId === oldLog && a.category === "preference");
+const beforeSupersession = oldFact.ts + 0.001;
+const newLog = temporal.add("I prefer Rust for systems programming.", "temporal_user");
+const newFact = Array.from(temporal.atoms.values()).find(a => a.sourceId === newLog && a.category === "preference");
+temporal.supersedeFact(oldFact.id, newFact.id, "temporal_user");
+assert.strictEqual(temporal.recall("Python", { userId: "temporal_user" }).results.length, 0);
+assert.strictEqual(temporal.recall("Python", { userId: "temporal_user", asOf: beforeSupersession }).results.length, 1);
+assert.strictEqual(temporal.recall("Rust", { userId: "temporal_user", asOf: beforeSupersession }).results.length, 0);
+assert.throws(() => temporal.supersedeFact(newFact.id, oldFact.id, "temporal_user"), /cycle/);
+assert.throws(() => temporal.supersedeFact(oldFact.id, newFact.id, "other_user"), /belong/);
+assert.throws(() => temporal.recall("Python", { asOf: Infinity }), /finite Unix timestamp/);
+assert.strictEqual(temporal.getProof(oldFact.id).verified, true);
+
+// 13. Temporal relation survives SQLite reopen and is removed on tenant deletion.
+const temporalPath = path.join(tempDir, "temporal.sqlite");
+const temporalSql = new InfinityDB({ dbPath: temporalPath });
+const temporalOldLog = temporalSql.add("I prefer Java for backend services.", "temporal_sql_user");
+const temporalOld = Array.from(temporalSql.atoms.values()).find(a => a.sourceId === temporalOldLog);
+const temporalCutoff = temporalOld.ts + 0.001;
+const temporalNewLog = temporalSql.add("I prefer Go for backend services.", "temporal_sql_user");
+const temporalNew = Array.from(temporalSql.atoms.values()).find(a => a.sourceId === temporalNewLog);
+temporalSql.supersedeFact(temporalOld.id, temporalNew.id, "temporal_sql_user");
+temporalSql.close();
+const temporalReopened = new InfinityDB({ dbPath: temporalPath });
+assert.strictEqual(temporalReopened.recall("Java", { userId: "temporal_sql_user" }).results.length, 0);
+assert.strictEqual(temporalReopened.recall("Java", { userId: "temporal_sql_user", asOf: temporalCutoff }).results.length, 1);
+assert.strictEqual(temporalReopened.relations.length, 1);
+temporalReopened.deleteUser("temporal_sql_user");
+assert.strictEqual(temporalReopened.relations.length, 0);
+temporalReopened.close();
+
 console.log("[PASS] All JavaScript tests passed successfully!");
