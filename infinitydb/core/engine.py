@@ -228,9 +228,9 @@ class InfinityDB:
             raise ValueError("content cannot be empty")
         memory = Memory(key=key, content=content)
         with self.conn:
-            # add() uses a nested transaction/savepoint on this connection, so
-            # its L0-L6 writes roll back if the legacy row cannot be committed.
-            self.add(f"Memory key {key}: {content}", user_id="legacy")
+            # Call the internal writer directly: nested sqlite3 connection
+            # context managers can commit independently and break atomicity.
+            self._add(f"Memory key {key}: {content}", user_id="legacy")
             self.conn.execute(
                 """
                 INSERT INTO legacy_memories (memory_key, content, created_at)
