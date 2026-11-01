@@ -300,3 +300,73 @@ def test_embedding_metadata_migration_is_additive_and_idempotent():
             assert second.search_vector([1.0, 0.0], tenant_id="legacy")
         finally:
             second.close()
+
+
+class FakeEmbeddingProvider:
+    def __init__(self, vectors, *, model="test-embed"):
+        from infinitydb_next import EmbeddingModel
+        self.vectors = vectors
+        self.calls = []
+        self._model_info = EmbeddingModel("fake", model)
+
+    @property
+    def model_info(self):
+        return self._model_info
+
+    def embed(self, texts):
+        self.calls.append(list(texts))
+        if isinstance(self.vectors, Exception):
+            raise self.vectors
+        return self.vectors
+
+
+def test_add_memory_with_embedding_persists_vector_and_model_atomically(store):
+    provider = FakeEmbeddingProvider([[1.0, 0.0]])
+    memory_id = store.add_memory_with_embedding(
+        "automatically embedded memory", provider, tenant_id="auto",
+        raw_evidence="source transcript",
+    )
+    assert provider.calls == [["automatically embedded memory"]]
+    hits = store.search_vector(
+        [1.0, 0.0], tenant_id="auto", provider="fake", model="test-embed",
+    )
+    assert [hit.memory.id for hit in hits] == [memory_id]
+    assert store.evidence_for(memory_id, tenant_id="auto")
+
+
+def test_add_memories_with_embeddings_batches_provider_call_and_persists(store):
+    provider = FakeEmbeddingProvider([[1.0, 0.0], [0.0, 1.0]])
+    ids = store.add_memories_with_embeddings([
+        {"content": "first batch memory", "tenant_id": "batch-auto"},
+        {"content": "second batch memory", "tenant_id": "batch-auto"},
+    ], provider)
+    assert provider.calls == [["first batch memory", "second batch memory"]]
+    hits = store.search_vector(
+        [1.0, 0.0], tenant_id="batch-auto", provider="fake", model="test-embed",
+    )
+    assert {hit.memory.id for hit in hits} == set(ids)
+
+
+def test_batch_embedding_provider_failure_writes_no_memories(store):
+    provider = FakeEmbeddingProvider(RuntimeError("provider unavailable"))
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        store.add_memories_with_embeddings([{"content": "must not persist"}], provider)
+    assert store.stats()["memories"] == 0
+
+
+@pytest.mark.parametrize("vectors", [[], [[1.0, 0.0], [1.0]]])
+def test_batch_embedding_rejects_bad_cardinality_or_dimensions_atomically(store, vectors):
+    provider = FakeEmbeddingProvider(vectors)
+    with pytest.raises(ValueError, match="exactly one|inconsistent dimensions"):
+        store.add_memories_with_embeddings([
+            {"content": "first invalid batch"},
+            {"content": "second invalid batch"},
+        ], provider)
+    assert store.stats()["memories"] == 0
+
+
+def test_single_embedding_failure_does_not_create_memory(store):
+    provider = FakeEmbeddingProvider(RuntimeError("offline"))
+    with pytest.raises(RuntimeError, match="offline"):
+        store.add_memory_with_embedding("not persisted", provider)
+    assert store.stats()["memories"] == 0
