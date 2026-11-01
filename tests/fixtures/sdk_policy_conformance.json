@@ -1,5 +1,5 @@
 {
-  "description": "Shared expected behavior for tenant-scoped and global L4 policies across SDKs.",
+  "description": "Shared expected behavior for tenant-scoped policies and temporal supersession across SDKs.",
   "global_policy": {
     "rule": "Global security baseline",
     "domain": "security",
@@ -27,5 +27,13 @@
     "tenant_a_after_delete": [
       "Global security baseline"
     ]
+  },
+  "temporal": {
+    "user_id": "shared_temporal_user",
+    "old_fact": "I prefer Python for backend systems.",
+    "new_fact": "I prefer Rust for backend systems.",
+    "query": "backend systems",
+    "expected_current_fact": "Rust",
+    "expected_historical_fact": "Python"
   }
 }
