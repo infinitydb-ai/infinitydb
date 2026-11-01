@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infinitydb.ai/schemas/benchmark-result-v1.json",
+  "title": "InfinityDB reproducible benchmark result",
+  "description": "Shared output contract for the Python and Node.js single-engine benchmark harnesses. Runtime and engine-specific statistics are intentionally open objects.",
+  "type": "object",
+  "required": ["benchmark", "schema_version", "engine", "iterations", "recall_samples", "correctness", "ingestion", "recall_latency_ms", "storage", "environment", "dataset", "engine_stats", "limitations"],
+  "properties": {
+    "benchmark": {"const": "infinitydb-reproducible"},
+    "schema_version": {"const": 1},
+    "engine": {"enum": ["python", "node"]},
+    "iterations": {"type": "integer", "minimum": 1},
+    "recall_samples": {"type": "integer", "minimum": 1},
+    "correctness": {
+      "type": "object",
+      "required": ["tenant_a_recall", "tenant_b_isolated", "source_proof_verified"],
+      "properties": {
+        "tenant_a_recall": {"const": true},
+        "tenant_b_isolated": {"const": true},
+        "source_proof_verified": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "ingestion": {
+      "type": "object",
+      "required": ["elapsed_seconds", "operations_per_second"],
+      "properties": {
+        "elapsed_seconds": {"type": "number", "minimum": 0},
+        "operations_per_second": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "recall_latency_ms": {
+      "type": "object",
+      "required": ["p50", "p95", "p99", "samples"],
+      "properties": {
+        "p50": {"type": "number", "minimum": 0},
+        "p95": {"type": "number", "minimum": 0},
+        "p99": {"type": "number", "minimum": 0},
+        "samples": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "storage": {"type": "object"},
+    "environment": {
+      "type": "object",
+      "required": ["runtime", "platform", "machine", "sqlite", "cpu_count", "git_commit"],
+      "properties": {
+        "runtime": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"enum": ["python", "node"]},
+            "version": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "platform": {"type": "string"},
+        "machine": {"type": "string"},
+        "sqlite": {"type": "string"},
+        "cpu_count": {"type": ["integer", "null"], "minimum": 1},
+        "git_commit": {"type": ["string", "null"]}
+      }
+    },
+    "dataset": {"type": "object"},
+    "engine_stats": {"type": ["object", "null"]},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

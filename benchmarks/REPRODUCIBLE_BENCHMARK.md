@@ -35,3 +35,23 @@ correctness checks, and nearest-rank p50/p95/p99 recall percentiles as the Pytho
 It reports Node.js and SQLite environment metadata plus the file-backed SQLite footprint.
 The Python and Node.js measurements are separate runs and should not be treated as a
 head-to-head comparison unless performed on the same machine under controlled conditions.
+
+
+## Shared JSON result contract
+
+Both SDK harnesses emit the same top-level result contract (schema version 1):
+
+- `benchmark`: always `infinitydb-reproducible`;
+- `schema_version`: result contract version, independent of SDK version;
+- `engine`: `python` or `node`;
+- common `iterations`, `recall_samples`, `correctness`, `ingestion`,
+  `recall_latency_ms`, `storage`, `environment`, `dataset`,
+  `engine_stats`, and `limitations` fields;
+- `environment.runtime.name` and `environment.runtime.version` identify the
+  runtime without changing the rest of the environment field names.
+
+The machine-specific runtime version and engine statistics are intentionally values,
+not schema differences. The contract makes outputs structurally interoperable; it does
+not make independent runs statistically comparable. Use the same hardware, OS, SQLite
+build, dataset, iteration count, and controlled run conditions before comparing results.
+The schema is published at `benchmarks/result-schema-v1.json`.

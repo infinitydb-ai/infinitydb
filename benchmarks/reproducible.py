@@ -94,8 +94,9 @@ def run(iterations: int, output: str | None = None) -> dict[str, Any]:
         wal_bytes = wal_path.stat().st_size if wal_path.exists() else 0
 
     result: dict[str, Any] = {
-        "benchmark": "infinitydb-python-sqlite-local",
-        "benchmark_version": 1,
+        "benchmark": "infinitydb-reproducible",
+        "schema_version": 1,
+        "engine": "python",
         "iterations": iterations,
         "recall_samples": recall_count,
         "correctness": correctness,
@@ -117,7 +118,7 @@ def run(iterations: int, output: str | None = None) -> dict[str, Any]:
             "page_size_bytes": page_size,
         },
         "environment": {
-            "python": sys.version.split()[0],
+            "runtime": {"name": "python", "version": sys.version.split()[0]},
             "platform": platform.platform(),
             "machine": platform.machine(),
             "sqlite": sqlite_version,

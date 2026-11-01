@@ -102,8 +102,9 @@ function run(iterations, output = null, quiet = false) {
     sqliteVersion = db._storage.prepare("SELECT sqlite_version() AS version").get().version;
     stats = db.stats();
     result = {
-      benchmark: "infinitydb-node-sqlite-local",
-      benchmark_version: 1,
+      benchmark: "infinitydb-reproducible",
+      schema_version: 1,
+      engine: "node",
       iterations,
       recall_samples: recallCount,
       correctness: result.correctness,
@@ -119,7 +120,7 @@ function run(iterations, output = null, quiet = false) {
       },
       storage: {},
       environment: {
-        node: process.version,
+        runtime: { name: "node", version: process.version },
         platform: `${os.platform()} ${os.release()}`,
         machine: os.arch(),
         sqlite: sqliteVersion,
