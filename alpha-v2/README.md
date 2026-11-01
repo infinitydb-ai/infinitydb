@@ -34,7 +34,7 @@ npm test
 
 ## Explicit alpha limitations
 
-This workspace does **not** implement approximate-nearest-neighbor (ANN) indexing, managed embedding lifecycle/model migration, predictive prefetch, autonomous consolidation, multi-agent federation, production authentication, encryption-at-rest or MCP transport. Exact vector search scans eligible stored embeddings and is intended as a correctness baseline, not a large-scale ANN solution. Callers must generate embeddings and keep model/version consistency themselves. The REST adapter is a development-only interface and must remain bound to localhost until authentication and transport security are implemented. The token estimate is not tokenizer-accurate. Evidence hash chains detect alteration but do not prove authorship.
+This workspace does **not** implement approximate-nearest-neighbor (ANN) indexing, managed embedding lifecycle/model migration, predictive prefetch, autonomous consolidation, multi-agent federation, production authentication, encryption-at-rest or MCP transport. Exact vector search scans eligible stored embeddings and is intended as a correctness baseline, not a large-scale ANN solution. Callers must generate embeddings and keep model/version consistency themselves. The REST adapter now requires API-key-to-tenant mapping for data routes; TLS termination, rate limiting, secret rotation automation and deployment hardening remain operator responsibilities. The token estimate is not tokenizer-accurate. Evidence hash chains detect alteration but do not prove authorship.
 
 Benchmark artifacts are workload-specific synthetic measurements; they are not competitor comparisons or production guarantees. See `docs/BENCHMARKS.md` before publishing performance claims.
 
@@ -175,3 +175,8 @@ rolls back, leaving the old memory unchanged.
 This is explicit, caller-directed versioning. It does not infer contradictions,
 decide which statement is true, or automatically supersede memories. The
 application must make that decision and provide the replacement timestamp.
+
+
+## HTTP API authentication
+
+The v2 REST adapter fails closed unless `INFINITYDB_API_KEYS` is configured. Each API key maps to exactly one tenant, and request payloads cannot override that tenant identity. The public `/health` route returns liveness only; tenant-scoped statistics require authentication. See [API security configuration](docs/API_SECURITY.md) before running the service.
