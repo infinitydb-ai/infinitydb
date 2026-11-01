@@ -672,7 +672,9 @@ class InfinityDB {
         this._storage.prepare("DELETE FROM l1_atoms WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l2_episodes WHERE user_id=?").run(userId);
         this._storage.prepare("DELETE FROM l3_personas WHERE user_id=?").run(userId);
-        this._storage.prepare("DELETE FROM l4_policies WHERE tenant_id=?").run(userId);
+        // L4 policies are stored as JSON payloads keyed by ID (not tenant_id columns).
+        const deletePolicy = this._storage.prepare("DELETE FROM l4_policies WHERE id=?");
+        for (const id of policyIds) deletePolicy.run(id);
         this._storage.prepare("DELETE FROM l6_proofs WHERE source_log_id NOT IN (SELECT id FROM l0_logs)").run();
       })();
     }
