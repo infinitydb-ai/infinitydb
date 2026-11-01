@@ -26,6 +26,10 @@ class VectorSearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100)
     kinds: list[str] = Field(default_factory=list)
 
+class SetEmbeddingRequest(BaseModel):
+    embedding: list[float]
+    tenant_id: str = "default"
+
 store = MemoryStore(os.environ.get("INFINITYDB_NEXT_PATH", "infinitydb-next.sqlite3"))
 app = FastAPI(title="InfinityDB Next Alpha API", version="2.0.0a1")
 
@@ -45,6 +49,15 @@ def search(body: SearchRequest) -> list[dict[str, Any]]:
     return [{"id": hit.memory.id, "content": hit.memory.content, "kind": hit.memory.kind,
              "score": hit.score, "matched_by": hit.matched_by}
             for hit in store.search(body.query, tenant_id=body.tenant_id, limit=body.limit)]
+
+@app.put("/v1/memories/{memory_id}/embedding")
+def set_embedding(memory_id: str, body: SetEmbeddingRequest) -> dict[str, bool]:
+    try:
+        store.set_embedding(memory_id, body.embedding, tenant_id=body.tenant_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"stored": True}
+
 
 @app.post("/v1/search/vector")
 def vector_search(body: VectorSearchRequest) -> list[dict[str, Any]]:
