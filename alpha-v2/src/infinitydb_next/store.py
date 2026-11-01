@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .embeddings import EmbeddingProvider
-from .models import ContextPack, Memory, SearchHit
+from .models import ContextPack, GraphHit, Memory, SearchHit
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -404,6 +404,88 @@ class MemoryStore:
                 raise ValueError("both edge endpoints must exist in the specified tenant")
             self.db.execute("INSERT OR REPLACE INTO edges VALUES(?,?,?,?,?)",
                             (tenant_id, src_id, dst_id, relation, weight))
+
+    def traverse_graph(
+        self, seed_ids: Iterable[str], *, tenant_id: str = "default",
+        max_hops: int = 2, limit: int = 50,
+        relations: Iterable[str] | None = None, as_of: float | None = None,
+    ) -> list[GraphHit]:
+        """Traverse tenant-local edges breadth-first and return explainable paths.
+
+        Edges are treated as traversable in either direction. Each memory is
+        returned once at its shortest hop distance; equal-depth paths use the
+        highest product of edge weights, then a stable ID/path ordering.
+        """
+        if max_hops < 0:
+            raise ValueError("max_hops must be non-negative")
+        if limit < 1:
+            return []
+        seeds = list(dict.fromkeys(str(value) for value in seed_ids if str(value)))
+        if not seeds:
+            return []
+        relation_values = list(dict.fromkeys(relations or []))
+        relation_clause = (" AND relation IN (" + ",".join("?" for _ in relation_values) + ")") if relation_values else ""
+        now = time.time() if as_of is None else as_of
+        with self._lock:
+            placeholders = ",".join("?" for _ in seeds)
+            seed_rows = self.db.execute(
+                f"SELECT * FROM memories WHERE tenant_id=? AND id IN ({placeholders}) AND valid_from<=? AND (valid_to IS NULL OR valid_to>?)",
+                [tenant_id, *seeds, now, now],
+            ).fetchall()
+            valid_seeds = {row["id"] for row in seed_rows}
+            if not valid_seeds:
+                return []
+            visited = set(valid_seeds)
+            frontier = [(seed, (seed,), (), 1.0) for seed in sorted(valid_seeds)]
+            results: dict[str, tuple[int, tuple[str, ...], tuple[str, ...], float]] = {}
+            for depth in range(1, max_hops + 1):
+                candidates: dict[str, tuple[tuple[str, ...], tuple[str, ...], float]] = {}
+                for current, path, path_relations, score in frontier:
+                    edge_rows = self.db.execute(
+                        f"""SELECT src_id,dst_id,relation,weight FROM edges
+                            WHERE tenant_id=? AND (src_id=? OR dst_id=?) {relation_clause}
+                            ORDER BY relation,src_id,dst_id""",
+                        [tenant_id, current, current, *relation_values],
+                    ).fetchall()
+                    for edge in edge_rows:
+                        neighbor = edge["dst_id"] if edge["src_id"] == current else edge["src_id"]
+                        if neighbor in visited:
+                            continue
+                        next_path = path + (neighbor,)
+                        next_relations = path_relations + (edge["relation"],)
+                        next_score = score * float(edge["weight"])
+                        previous = candidates.get(neighbor)
+                        candidate = (next_path, next_relations, next_score)
+                        if previous is None or (-next_score, next_path, next_relations) < (-previous[2], previous[0], previous[1]):
+                            candidates[neighbor] = candidate
+                if not candidates:
+                    break
+                ids = sorted(candidates)
+                marks = ",".join("?" for _ in ids)
+                memory_rows = self.db.execute(
+                    f"SELECT * FROM memories WHERE tenant_id=? AND id IN ({marks}) AND valid_from<=? AND (valid_to IS NULL OR valid_to>?)",
+                    [tenant_id, *ids, now, now],
+                ).fetchall()
+                allowed = {row["id"] for row in memory_rows}
+                visited.update(candidates)
+                for memory_id in sorted(allowed):
+                    path, path_relations, score = candidates[memory_id]
+                    results[memory_id] = (depth, path, path_relations, score)
+                frontier = [(memory_id, *candidates[memory_id]) for memory_id in sorted(allowed)]
+                if len(results) >= limit:
+                    break
+            if not results:
+                return []
+            ids = list(results)
+            marks = ",".join("?" for _ in ids)
+            rows = self.db.execute(
+                f"SELECT * FROM memories WHERE tenant_id=? AND id IN ({marks})",
+                [tenant_id, *ids],
+            ).fetchall()
+        by_id = {row["id"]: row for row in rows}
+        ordered = sorted(results.items(), key=lambda item: (item[1][0], -item[1][3], item[0]))[:limit]
+        return [GraphHit(self._to_memory(by_id[memory_id]), details[0], list(details[1]),
+                         list(details[2]), details[3]) for memory_id, details in ordered]
 
     @staticmethod
     def _validated_vector(vector: Iterable[float]) -> list[float]:
