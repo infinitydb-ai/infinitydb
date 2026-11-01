@@ -48,6 +48,22 @@ class InfinityDB {
       CREATE INDEX IF NOT EXISTS idx_js_atom_relations_user_time ON l1_atom_relations(user_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_js_l1_user_ts ON l1_atoms(user_id, ts);
       CREATE INDEX IF NOT EXISTS idx_js_l1_source ON l1_atoms(source_id);
+      CREATE VIRTUAL TABLE IF NOT EXISTS l1_atoms_fts
+        USING fts5(fact, content='l1_atoms', content_rowid='rowid',
+                   tokenize='unicode61 remove_diacritics 2');
+      CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_insert AFTER INSERT ON l1_atoms BEGIN
+        INSERT INTO l1_atoms_fts(rowid, fact) VALUES (new.rowid, new.fact);
+      END;
+      CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_delete AFTER DELETE ON l1_atoms BEGIN
+        INSERT INTO l1_atoms_fts(l1_atoms_fts, rowid, fact)
+        VALUES ('delete', old.rowid, old.fact);
+      END;
+      CREATE TRIGGER IF NOT EXISTS l1_atoms_fts_update AFTER UPDATE OF fact ON l1_atoms
+      WHEN old.fact <> new.fact BEGIN
+        INSERT INTO l1_atoms_fts(l1_atoms_fts, rowid, fact)
+        VALUES ('delete', old.rowid, old.fact);
+        INSERT INTO l1_atoms_fts(rowid, fact) VALUES (new.rowid, new.fact);
+      END;
       CREATE TABLE IF NOT EXISTS l2_episodes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_id TEXT NOT NULL, payload TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_js_l2_user ON l2_episodes(user_id);
       CREATE TABLE IF NOT EXISTS l3_personas (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL);
@@ -82,6 +98,13 @@ class InfinityDB {
       })();
     } else if (version.value !== "2") {
       throw new Error(`Unsupported InfinityDB storage schema version: ${version.value}`);
+    }
+    const ftsVersion = this._storage.prepare("SELECT value FROM infinitydb_meta WHERE key='l1_atoms_fts_version'").get();
+    if (!ftsVersion) {
+      this._storage.transaction(() => {
+        this._storage.prepare("INSERT INTO l1_atoms_fts(l1_atoms_fts) VALUES ('rebuild')").run();
+        this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('l1_atoms_fts_version','1')").run();
+      })();
     }
   }
 
@@ -389,7 +412,15 @@ class InfinityDB {
         proofAvailable: false,
       };
     }
-    for (const [id, atom] of this.atoms.entries()) {
+    let candidateAtoms = this.atoms.entries();
+    if (this._storage) {
+      const matchQuery = qTerms.map(term => '"' + term.replace(/"/g, '""') + '"').join(" OR ");
+      const rows = this._storage.prepare(
+        "SELECT a.id, a.payload FROM l1_atoms_fts f JOIN l1_atoms a ON a.rowid=f.rowid WHERE l1_atoms_fts MATCH ?"
+      ).all(matchQuery);
+      candidateAtoms = rows.map(row => [row.id, JSON.parse(row.payload)]);
+    }
+    for (const [id, atom] of candidateAtoms) {
       if (userId && atom.userId !== userId) continue;
       if (asOf !== undefined && atom.ts > asOf) continue;
       if (this.relations.some(r => r.oldAtomId === id && (asOf === undefined || r.createdAt <= asOf))) continue;
