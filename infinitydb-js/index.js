@@ -133,6 +133,16 @@ class InfinityDB {
     this.proofs = new Map(get("SELECT atom_id AS id, payload FROM l6_proofs", "id"));
     this.legacyMemories = new Map(get("SELECT memory_key AS id, payload FROM legacy_memories", "id"));
     this.relations = this._storage.prepare("SELECT old_atom_id AS oldAtomId, new_atom_id AS newAtomId, user_id AS userId, relation, created_at AS createdAt FROM l1_atom_relations").all();
+    this._persisted = {
+      logs: this._snapshotMap(this.logs),
+      atoms: this._snapshotMap(this.atoms),
+      episodes: this._snapshotMap(this.episodes),
+      personas: this._snapshotMap(this.personas),
+      policies: this._snapshotMap(this.policies),
+      proofs: this._snapshotMap(this.proofs),
+      legacyMemories: this._snapshotMap(this.legacyMemories),
+      relations: new Set(this.relations.map(r => `${r.oldAtomId}\0${r.newAtomId}`)),
+    };
     for (const atom of this.atoms.values()) {
       if (atom.ts > this._lastTimestamp) this._lastTimestamp = atom.ts;
     }
@@ -158,19 +168,72 @@ class InfinityDB {
     return this._seq;
   }
 
+  _snapshotMap(map) {
+    return new Map(Array.from(map.entries(), ([key, value]) => [key, JSON.stringify(value)]));
+  }
+
+  _changedEntries(map, snapshot) {
+    return Array.from(map.entries()).filter(([key, value]) =>
+      !snapshot.has(key) || snapshot.get(key) !== JSON.stringify(value)
+    );
+  }
+
   _persist() {
     if (!this._storage) return;
+    const previous = this._persisted || {};
+    const snapshots = {
+      logs: this._snapshotMap(this.logs),
+      atoms: this._snapshotMap(this.atoms),
+      episodes: this._snapshotMap(this.episodes),
+      personas: this._snapshotMap(this.personas),
+      policies: this._snapshotMap(this.policies),
+      proofs: this._snapshotMap(this.proofs),
+      legacyMemories: this._snapshotMap(this.legacyMemories),
+    };
+    const removed = (current, snapshot) => Array.from(snapshot.keys()).filter(key => !current.has(key));
     this._storage.transaction(() => {
-      this._writeEntries("l0_logs", "id", Array.from(this.logs.values()), v => [v.id, v.userId, JSON.stringify(v)]);
-      this._writeEntries("l1_atoms", "id", Array.from(this.atoms.values()), v => [v.id, v.userId, v.sourceId, v.fact, v.ts, JSON.stringify(v)]);
-      this._writeEntries("l2_episodes", "id", Array.from(this.episodes.values()), v => [v.id, v.userId, v.sourceId, JSON.stringify(v)]);
-      this._writeEntries("l3_personas", "id", Array.from(this.personas.entries()), v => [v[0], v[1].userId, JSON.stringify(v[1])]);
-      this._writeEntries("l4_policies", "id", Array.from(this.policies.values()), v => [v.id, JSON.stringify(v)]);
-      this._writeEntries("l6_proofs", "atom_id", Array.from(this.proofs.values()), v => [v.atomId, v.sourceLogId, JSON.stringify(v)]);
-      this._writeEntries("legacy_memories", "memory_key", Array.from(this.legacyMemories.entries()), v => [v[0], JSON.stringify(v[1])]);
+      this._writeEntries("l0_logs", "id", this._changedEntries(this.logs, previous.logs || new Map()), v => [v[1].id, v[1].userId, JSON.stringify(v[1])]);
+      this._writeEntries("l1_atoms", "id", this._changedEntries(this.atoms, previous.atoms || new Map()), v => [v[1].id, v[1].userId, v[1].sourceId, v[1].fact, v[1].ts, JSON.stringify(v[1])]);
+      this._writeEntries("l2_episodes", "id", this._changedEntries(this.episodes, previous.episodes || new Map()), v => [v[1].id, v[1].userId, v[1].sourceId, JSON.stringify(v[1])]);
+      this._writeEntries("l3_personas", "id", this._changedEntries(this.personas, previous.personas || new Map()), v => [v[0], v[1].userId, JSON.stringify(v[1])]);
+      this._writeEntries("l4_policies", "id", this._changedEntries(this.policies, previous.policies || new Map()), v => [v[1].id, JSON.stringify(v[1])]);
+      this._writeEntries("l6_proofs", "atom_id", this._changedEntries(this.proofs, previous.proofs || new Map()), v => [v[1].atomId, v[1].sourceLogId, JSON.stringify(v[1])]);
+      this._writeEntries("legacy_memories", "memory_key", this._changedEntries(this.legacyMemories, previous.legacyMemories || new Map()), v => [v[0], JSON.stringify(v[1])]);
+
+      const deletes = [
+        ["l0_logs", "id", removed(this.logs, previous.logs || new Map())],
+        ["l1_atoms", "id", removed(this.atoms, previous.atoms || new Map())],
+        ["l2_episodes", "id", removed(this.episodes, previous.episodes || new Map())],
+        ["l3_personas", "id", removed(this.personas, previous.personas || new Map())],
+        ["l4_policies", "id", removed(this.policies, previous.policies || new Map())],
+        ["l6_proofs", "atom_id", removed(this.proofs, previous.proofs || new Map())],
+        ["legacy_memories", "memory_key", removed(this.legacyMemories, previous.legacyMemories || new Map())],
+      ];
+      for (const [table, column, keys] of deletes) {
+        if (!keys.length) continue;
+        const stmt = this._storage.prepare(`DELETE FROM ${table} WHERE ${column}=?`);
+        for (const key of keys) stmt.run(key);
+      }
+
       const relationInsert = this._storage.prepare("INSERT OR IGNORE INTO l1_atom_relations (old_atom_id,new_atom_id,user_id,relation,created_at) VALUES (?,?,?,?,?)");
-      for (const relation of this.relations) relationInsert.run(relation.oldAtomId, relation.newAtomId, relation.userId, relation.relation, relation.createdAt);
+      const relationKeys = new Set(this.relations.map(r => `${r.oldAtomId}\0${r.newAtomId}`));
+      for (const relation of this.relations) {
+        const key = `${relation.oldAtomId}\0${relation.newAtomId}`;
+        if (!(previous.relations || new Set()).has(key)) {
+          relationInsert.run(relation.oldAtomId, relation.newAtomId, relation.userId, relation.relation, relation.createdAt);
+        }
+      }
+      for (const key of (previous.relations || new Set())) {
+        if (!relationKeys.has(key)) {
+          const [oldAtomId, newAtomId] = key.split("\0");
+          this._storage.prepare("DELETE FROM l1_atom_relations WHERE old_atom_id=? AND new_atom_id=?").run(oldAtomId, newAtomId);
+        }
+      }
     })();
+    this._persisted = {
+      ...snapshots,
+      relations: new Set(this.relations.map(r => `${r.oldAtomId}\0${r.newAtomId}`)),
+    };
   }
 
   close() {
