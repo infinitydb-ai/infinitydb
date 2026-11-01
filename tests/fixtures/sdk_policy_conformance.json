@@ -1,5 +1,5 @@
 {
-  "description": "Shared expected behavior for tenant-scoped policies and temporal supersession across SDKs.",
+  "description": "Shared expected behavior for tenant-scoped policies, temporal supersession, and cryptographic provenance across SDKs.",
   "global_policy": {
     "rule": "Global security baseline",
     "domain": "security",
@@ -35,5 +35,10 @@
     "query": "backend systems",
     "expected_current_fact": "Rust",
     "expected_historical_fact": "Python"
+  },
+  "proof": {
+    "user_id": "shared_proof_user",
+    "source_text": "The deployment uses isolated build workers.",
+    "tampered_source": "The deployment uses shared build workers."
   }
 }

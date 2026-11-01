@@ -635,3 +635,24 @@ def test_shared_temporal_conformance_fixture():
     assert temporal["expected_historical_fact"] in historical["results"][0]["fact"]
     assert db.get_proof(old_atom["id"])["verified"] is True
     db.conn.close()
+
+
+def test_shared_proof_tampering_conformance_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "sdk_policy_conformance.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    proof_case = fixture["proof"]
+    db = InfinityDB()
+    log_id = db.add(proof_case["source_text"], user_id=proof_case["user_id"])
+    atom = db.conn.execute(
+        "SELECT id FROM l1_atoms WHERE source_id = ?", (log_id,)
+    ).fetchone()
+    assert atom is not None
+    assert db.get_proof(atom["id"])["verified"] is True
+
+    db.conn.execute(
+        "UPDATE l0_logs SET raw = ? WHERE id = ?",
+        (proof_case["tampered_source"], log_id),
+    )
+    db.conn.commit()
+    assert db.get_proof(atom["id"])["verified"] is False
+    db.conn.close()
