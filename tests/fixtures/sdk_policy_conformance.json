@@ -1,5 +1,5 @@
 {
-  "description": "Shared expected behavior for tenant-scoped policies, temporal supersession, and cryptographic provenance across SDKs.",
+  "description": "Shared expected behavior for tenant-scoped policies, tenant-isolated facts and deletion, temporal supersession, and cryptographic provenance across SDKs.",
   "global_policy": {
     "rule": "Global security baseline",
     "domain": "security",
@@ -40,5 +40,14 @@
     "user_id": "shared_proof_user",
     "source_text": "The deployment uses isolated build workers.",
     "tampered_source": "The deployment uses shared build workers."
+  },
+  "tenant_data": {
+    "tenant_a": "tenant_isolation_a",
+    "tenant_b": "tenant_isolation_b",
+    "fact_a": "The deployment marker belongs only to tenant alpha.",
+    "fact_b": "The deployment marker belongs only to tenant beta.",
+    "query": "deployment marker",
+    "expected_a": "tenant alpha",
+    "expected_b": "tenant beta"
   }
 }
