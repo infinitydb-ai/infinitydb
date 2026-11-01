@@ -30,7 +30,8 @@ export interface ProofResponse {
 export class InfinityDB {
   constructor(options?: { dbPath?: string } & Record<string, any>);
   add(conversation: string, userId?: string, sessionId?: string | null, importance?: number): string;
-  recall(query: string, options?: { n?: number; userId?: string | null }): RecallResponse;
+  recall(query: string, options?: { n?: number; userId?: string | null; asOf?: number }): RecallResponse;
+  supersedeFact(oldAtomId: string, newAtomId: string, userId: string): string;
   getProof(atomId: string): ProofResponse | null;
   getPersona(userId?: string): Record<string, string>;
   addPolicy(rule: string, domain?: string, priority?: number): string;
