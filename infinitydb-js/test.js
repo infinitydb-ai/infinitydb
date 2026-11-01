@@ -234,6 +234,51 @@ try {
   fs.rmSync(incrementalDir, { recursive: true, force: true });
 }
 
+// Failed SQLite adds must roll back both durable rows and in-memory state.
+const addRollbackDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-add-rollback-"));
+const addRollbackPath = path.join(addRollbackDir, "add-rollback.sqlite");
+const addRollbackDb = new InfinityDB({ dbPath: addRollbackPath });
+addRollbackDb.add("An existing memory remains available.", "add_rollback_user");
+const addRollbackBefore = {
+  logs: addRollbackDb.logs.size,
+  atoms: addRollbackDb.atoms.size,
+  episodes: addRollbackDb.episodes.size,
+  personas: addRollbackDb.personas.size,
+  proofs: addRollbackDb.proofs.size,
+  lastTimestamp: addRollbackDb._lastTimestamp,
+};
+addRollbackDb._storage.exec(`
+  CREATE TRIGGER reject_add_atom_insert
+  BEFORE INSERT ON l1_atoms
+  BEGIN
+    SELECT RAISE(ABORT, 'simulated add persistence failure');
+  END;
+`);
+assert.throws(
+  () => addRollbackDb.add("I prefer Rust for rollback testing.", "add_rollback_user"),
+  /simulated add persistence failure/
+);
+assert.strictEqual(addRollbackDb.logs.size, addRollbackBefore.logs);
+assert.strictEqual(addRollbackDb.atoms.size, addRollbackBefore.atoms);
+assert.strictEqual(addRollbackDb.episodes.size, addRollbackBefore.episodes);
+assert.strictEqual(addRollbackDb.personas.size, addRollbackBefore.personas);
+assert.strictEqual(addRollbackDb.proofs.size, addRollbackBefore.proofs);
+assert.strictEqual(addRollbackDb._lastTimestamp, addRollbackBefore.lastTimestamp);
+assert.strictEqual(
+  addRollbackDb._storage.prepare("SELECT count(*) AS count FROM l0_logs").get().count,
+  addRollbackBefore.logs
+);
+assert.strictEqual(
+  addRollbackDb._storage.prepare("SELECT count(*) AS count FROM l1_atoms").get().count,
+  addRollbackBefore.atoms
+);
+addRollbackDb._storage.exec("DROP TRIGGER reject_add_atom_insert");
+assert.doesNotThrow(
+  () => addRollbackDb.add("I prefer Rust for rollback testing.", "add_rollback_user")
+);
+addRollbackDb.close();
+fs.rmSync(addRollbackDir, { recursive: true, force: true });
+
 // 13. Temporal supersession and historical recall (in-memory).
 const temporal = new InfinityDB();
 const oldLog = temporal.add("I prefer Python for data engineering.", "temporal_user");
