@@ -322,3 +322,14 @@ assert.strictEqual(sharedHistorical.results.length, 1);
 assert.ok(sharedHistorical.results[0].fact.includes(sharedTemporal.expected_historical_fact));
 assert.strictEqual(sharedTemporalDb.getProof(sharedOldAtom.id).verified, true);
 sharedTemporalDb.close();
+
+
+// Shared proof verification fixture: tampering with the source log must invalidate it.
+const sharedProof = policyFixture.proof;
+const sharedProofDb = new InfinityDB();
+const sharedProofLog = sharedProofDb.add(sharedProof.source_text, sharedProof.user_id);
+const sharedProofAtom = Array.from(sharedProofDb.atoms.values()).find(a => a.sourceId === sharedProofLog);
+assert.strictEqual(sharedProofDb.getProof(sharedProofAtom.id).verified, true);
+sharedProofDb.logs.get(sharedProofLog).raw = sharedProof.tampered_source;
+assert.strictEqual(sharedProofDb.getProof(sharedProofAtom.id).verified, false);
+sharedProofDb.close();
