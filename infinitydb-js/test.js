@@ -371,7 +371,8 @@ sharedValidationDb.close();
 
 
 // Tenant deletion must not mutate the in-memory view when its SQLite transaction rolls back.
-const deleteRollbackPath = path.join(tempDir, "delete-rollback.sqlite");
+const deleteRollbackDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-delete-rollback-"));
+const deleteRollbackPath = path.join(deleteRollbackDir, "delete-rollback.sqlite");
 const deleteRollbackDb = new InfinityDB({ dbPath: deleteRollbackPath });
 const deleteRollbackLog = deleteRollbackDb.add(
   "I prefer Rust for transactional deletion tests.", "delete_rollback_tenant"
@@ -412,3 +413,4 @@ assert.strictEqual(deleteRollbackDb.atoms.size, 0);
 assert.strictEqual(deleteRollbackDb.proofs.size, 0);
 assert.strictEqual(deleteRollbackDb.policies.size, 0);
 deleteRollbackDb.close();
+fs.rmSync(deleteRollbackDir, { recursive: true, force: true });
