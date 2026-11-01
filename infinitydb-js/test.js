@@ -635,3 +635,42 @@ assert.strictEqual(putAtomicReopened.atoms.size, atomicAtomCount);
 assert.strictEqual(putAtomicReopened.get("atomic:key").content, "I prefer atomic memory writes.");
 putAtomicReopened.close();
 fs.rmSync(putAtomicDir, { recursive: true, force: true });
+
+ 
+// Recall access-count reinforcement rolls back when SQLite persistence fails.
+const recallRollbackDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-recall-rollback-"));
+const recallRollbackPath = path.join(recallRollbackDir, "memory.sqlite");
+try {
+  const recallRollbackDb = new InfinityDB({ dbPath: recallRollbackPath });
+  recallRollbackDb.add("I prefer transactional SQLite storage.", "recall_rollback_user");
+  const targetAtom = Array.from(recallRollbackDb.atoms.values()).find(
+    atom => atom.userId === "recall_rollback_user"
+  );
+  assert.ok(targetAtom);
+  const beforeCount = targetAtom.accessCount;
+  const raw = new schemaDb(recallRollbackPath);
+  raw.exec(`
+    CREATE TRIGGER reject_recall_access_update
+    BEFORE UPDATE ON l1_atoms
+    WHEN NEW.user_id = 'recall_rollback_user'
+    BEGIN
+      SELECT RAISE(ABORT, 'simulated recall persistence failure');
+    END;
+  `);
+  raw.close();
+
+  assert.throws(
+    () => recallRollbackDb.recall("transactional", { userId: "recall_rollback_user" }),
+    /simulated recall persistence failure/
+  );
+  assert.strictEqual(targetAtom.accessCount, beforeCount);
+  const verify = new schemaDb(recallRollbackPath);
+  const persisted = JSON.parse(verify.prepare(
+    "SELECT payload FROM l1_atoms WHERE id = ?"
+  ).get(targetAtom.id).payload);
+  assert.strictEqual(persisted.accessCount, beforeCount);
+  verify.close();
+  recallRollbackDb.close();
+} finally {
+  fs.rmSync(recallRollbackDir, { recursive: true, force: true });
+}
