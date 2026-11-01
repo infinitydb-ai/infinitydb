@@ -656,3 +656,26 @@ def test_shared_proof_tampering_conformance_fixture():
     db.conn.commit()
     assert db.get_proof(atom["id"])["verified"] is False
     db.conn.close()
+
+
+def test_shared_tenant_data_isolation_and_deletion_conformance_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "sdk_policy_conformance.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    case = fixture["tenant_data"]
+    db = InfinityDB()
+    db.add(case["fact_a"], user_id=case["tenant_a"])
+    db.add(case["fact_b"], user_id=case["tenant_b"])
+
+    tenant_a_results = db.recall(case["query"], user_id=case["tenant_a"])["results"]
+    tenant_b_results = db.recall(case["query"], user_id=case["tenant_b"])["results"]
+    assert len(tenant_a_results) == 1
+    assert case["expected_a"] in tenant_a_results[0]["fact"]
+    assert len(tenant_b_results) == 1
+    assert case["expected_b"] in tenant_b_results[0]["fact"]
+
+    db.delete_user(case["tenant_a"])
+    assert db.recall(case["query"], user_id=case["tenant_a"])["results"] == []
+    remaining = db.recall(case["query"], user_id=case["tenant_b"])["results"]
+    assert len(remaining) == 1
+    assert case["expected_b"] in remaining[0]["fact"]
+    db.conn.close()
