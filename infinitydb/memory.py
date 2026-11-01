@@ -77,7 +77,7 @@ class AgentMemory:
         return [f"{k}: {v}" for k, v in persona.items()]
 
     def delete(self, user_id: str) -> dict[str, int]:
-        """GDPR compliant cryptographic wipe of all memories for a user."""
+        """Remove stored memory data for a user from the configured database."""
         return self.db.delete_user(user_id=user_id)
 
     def stats(self) -> dict[str, Any]:
