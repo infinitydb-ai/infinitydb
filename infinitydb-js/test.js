@@ -368,3 +368,47 @@ const sharedEmptyRecall = sharedValidationDb.recall(sharedValidation.empty_query
 assert.deepStrictEqual(sharedEmptyRecall.results, []);
 assert.strictEqual(sharedEmptyRecall.tokensSaved, null);
 sharedValidationDb.close();
+
+
+// Tenant deletion must not mutate the in-memory view when its SQLite transaction rolls back.
+const deleteRollbackPath = path.join(tempDir, "delete-rollback.sqlite");
+const deleteRollbackDb = new InfinityDB({ dbPath: deleteRollbackPath });
+const deleteRollbackLog = deleteRollbackDb.add(
+  "I prefer Rust for transactional deletion tests.", "delete_rollback_tenant"
+);
+deleteRollbackDb.addPolicy(
+  "Tenant-only deletion rollback policy", "security", 2, "delete_rollback_tenant"
+);
+const deleteRollbackAtom = Array.from(deleteRollbackDb.atoms.values())
+  .find(atom => atom.sourceId === deleteRollbackLog);
+deleteRollbackDb._storage.exec(`
+  CREATE TRIGGER reject_tenant_atom_delete
+  BEFORE DELETE ON l1_atoms
+  BEGIN
+    SELECT RAISE(ABORT, 'simulated tenant deletion failure');
+  END;
+`);
+assert.throws(
+  () => deleteRollbackDb.deleteUser("delete_rollback_tenant"),
+  /simulated tenant deletion failure/
+);
+assert.ok(deleteRollbackDb.logs.has(deleteRollbackLog));
+assert.ok(deleteRollbackDb.atoms.has(deleteRollbackAtom.id));
+assert.ok(deleteRollbackDb.proofs.has(deleteRollbackAtom.id));
+assert.strictEqual(deleteRollbackDb.relations.length, 0);
+assert.strictEqual(deleteRollbackDb.policies.size, 1);
+assert.strictEqual(
+  deleteRollbackDb._storage.prepare("SELECT count(*) AS count FROM l0_logs WHERE user_id=?")
+    .get("delete_rollback_tenant").count,
+  1
+);
+deleteRollbackDb._storage.exec("DROP TRIGGER reject_tenant_atom_delete");
+const deleteRollbackResult = deleteRollbackDb.deleteUser("delete_rollback_tenant");
+assert.strictEqual(deleteRollbackResult.l0LogsDeleted, 1);
+assert.strictEqual(deleteRollbackResult.l1AtomsDeleted, 1);
+assert.strictEqual(deleteRollbackResult.l4TenantPoliciesDeleted, 1);
+assert.strictEqual(deleteRollbackDb.logs.size, 0);
+assert.strictEqual(deleteRollbackDb.atoms.size, 0);
+assert.strictEqual(deleteRollbackDb.proofs.size, 0);
+assert.strictEqual(deleteRollbackDb.policies.size, 0);
+deleteRollbackDb.close();
