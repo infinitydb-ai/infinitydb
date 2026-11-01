@@ -663,7 +663,6 @@ class InfinityDB {
       l1AtomsDeleted: c1,
       l2EpisodesDeleted: c2,
       l3PersonaDeleted: c3,
-      gdprCompliant: true,
     };
   }
 
