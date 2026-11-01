@@ -287,6 +287,15 @@ class InfinityDB {
     if (importance < 0 || importance > 1) {
       throw new RangeError("importance must be between 0 and 1");
     }
+    // Keep the in-memory view aligned with SQLite if the durable write fails.
+    const previousState = {
+      logs: new Map(this.logs),
+      atoms: new Map(this.atoms),
+      episodes: new Map(this.episodes),
+      personas: new Map(this.personas),
+      proofs: new Map(this.proofs),
+      lastTimestamp: this._lastTimestamp,
+    };
     const now = Math.max(Date.now() / 1000, this._lastTimestamp + 0.001);
     this._lastTimestamp = now;
     this._allocateSequence();
@@ -417,7 +426,17 @@ class InfinityDB {
       });
     }
 
-    this._persist();
+    try {
+      this._persist();
+    } catch (error) {
+      this.logs = previousState.logs;
+      this.atoms = previousState.atoms;
+      this.episodes = previousState.episodes;
+      this.personas = previousState.personas;
+      this.proofs = previousState.proofs;
+      this._lastTimestamp = previousState.lastTimestamp;
+      throw error;
+    }
     return logId;
   }
 
