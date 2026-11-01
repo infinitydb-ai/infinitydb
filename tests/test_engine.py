@@ -679,3 +679,24 @@ def test_shared_tenant_data_isolation_and_deletion_conformance_fixture():
     assert len(remaining) == 1
     assert case["expected_b"] in remaining[0]["fact"]
     db.conn.close()
+
+
+def test_shared_input_validation_conformance_fixture():
+    fixture_path = Path(__file__).parent / "fixtures" / "sdk_policy_conformance.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    case = fixture["validation"]
+    db = InfinityDB()
+
+    with pytest.raises(ValueError):
+        db.add(case["whitespace_conversation"], user_id=case["valid_user"])
+    with pytest.raises(ValueError):
+        db.add(
+            case["valid_conversation"],
+            user_id=case["valid_user"],
+            importance=case["invalid_importance"],
+        )
+
+    empty = db.recall(case["empty_query"], user_id=case["valid_user"])
+    assert empty["results"] == []
+    assert empty["tokens_saved"] is None
+    db.conn.close()
