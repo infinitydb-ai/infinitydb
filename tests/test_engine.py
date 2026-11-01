@@ -154,3 +154,25 @@ def test_gdpr_delete_user():
 
 def test_add_smoke():
     pass
+
+
+def test_proof_verification_detects_source_tampering():
+    """Proof verification must fail if the original source log is modified."""
+    db = InfinityDB()
+    db.add("I prefer Rust for memory-safe systems.", user_id="proof_user")
+    result = db.recall("Rust", user_id="proof_user")
+    atom_id = result["results"][0]["id"]
+
+    proof = db.get_proof(atom_id)
+    assert proof is not None
+    assert proof["verified"] is True
+
+    db.conn.execute(
+        "UPDATE l0_logs SET raw = ? WHERE id = ?",
+        ("tampered source text", proof["source_log_id"]),
+    )
+    db.conn.commit()
+
+    tampered = db.get_proof(atom_id)
+    assert tampered is not None
+    assert tampered["verified"] is False
