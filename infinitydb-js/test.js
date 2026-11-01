@@ -73,6 +73,40 @@ assert.strictEqual(proofDb.getProof(proofAtom.id).verified, true);
 proofDb.logs.get(proofLog).raw = "tampered source";
 assert.strictEqual(proofDb.getProof(proofAtom.id).verified, false);
 
+
+ // 10. SQLite durability across process-style reopen
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-sqlite-"));
+const dbPath = path.join(tempDir, "memory.sqlite");
+try {
+  const durable = new InfinityDB({ dbPath });
+  const durableLog = durable.add("I prefer SQLite for durable agent memory.", "durable_user");
+  durable.addPolicy("Never expose secrets", "security", 3);
+  const durableAtom = Array.from(durable.atoms.values()).find(a => a.sourceId === durableLog);
+  const durableAtomId = durableAtom.id;
+  assert.strictEqual(durable.getProof(durableAtomId).verified, true);
+  durable.close();
+
+  const reopened = new InfinityDB({ dbPath });
+  assert.ok(reopened.logs.has(durableLog));
+  assert.ok(reopened.atoms.has(durableAtomId));
+  assert.ok(reopened.getPersona("durable_user").preference.includes("SQLite"));
+  assert.strictEqual(reopened.getProof(durableAtomId).verified, true);
+  assert.strictEqual(reopened.recall("SQLite", { userId: "durable_user" }).results.length, 1);
+  assert.strictEqual(reopened.stats().l4Policies, 1);
+  reopened.deleteUser("durable_user");
+  reopened.close();
+
+  const afterDelete = new InfinityDB({ dbPath });
+  assert.strictEqual(afterDelete.recall("SQLite", { userId: "durable_user" }).results.length, 0);
+  assert.strictEqual(afterDelete.stats().l0RawLogs, 0);
+  afterDelete.close();
+} finally {
+  fs.rmSync(tempDir, { recursive: true, force: true });
+}
+
 console.log("[PASS] All JavaScript tests passed successfully!");
 
 // sdk tests
