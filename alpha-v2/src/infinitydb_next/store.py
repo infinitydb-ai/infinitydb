@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_mem_tenant_time ON memories(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mem_tenant_kind ON memories(tenant_id, kind);
 CREATE INDEX IF NOT EXISTS idx_mem_temporal ON memories(tenant_id, valid_from, valid_to);
+CREATE TABLE IF NOT EXISTS embeddings (
+ memory_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+ dimensions INTEGER NOT NULL, vector_json TEXT NOT NULL,
+ FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_embeddings_tenant ON embeddings(tenant_id, dimensions);
 CREATE TABLE IF NOT EXISTS evidence (
  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, memory_id TEXT NOT NULL,
  raw_content TEXT NOT NULL, created_at REAL NOT NULL, sha256 TEXT NOT NULL,
@@ -176,6 +182,65 @@ class MemoryStore:
                 raise ValueError("both edge endpoints must exist in the specified tenant")
             self.db.execute("INSERT OR REPLACE INTO edges VALUES(?,?,?,?,?)",
                             (tenant_id, src_id, dst_id, relation, weight))
+
+    @staticmethod
+    def _validated_vector(vector: Iterable[float]) -> list[float]:
+        values = [float(value) for value in vector]
+        if not values or not all(math.isfinite(value) for value in values):
+            raise ValueError("embedding must contain finite numeric values")
+        if math.sqrt(sum(value * value for value in values)) == 0:
+            raise ValueError("embedding must have a non-zero norm")
+        return values
+
+    def set_embedding(self, memory_id: str, vector: Iterable[float], *,
+                      tenant_id: str = "default") -> None:
+        values = self._validated_vector(vector)
+        with self._lock, self.db:
+            exists = self.db.execute(
+                "SELECT 1 FROM memories WHERE id=? AND tenant_id=?",
+                (memory_id, tenant_id),
+            ).fetchone()
+            if exists is None:
+                raise ValueError("memory does not exist in the specified tenant")
+            self.db.execute(
+                """INSERT INTO embeddings(memory_id,tenant_id,dimensions,vector_json)
+                   VALUES(?,?,?,?) ON CONFLICT(memory_id) DO UPDATE SET
+                   tenant_id=excluded.tenant_id, dimensions=excluded.dimensions,
+                   vector_json=excluded.vector_json""",
+                (memory_id, tenant_id, len(values), json.dumps(values, separators=(",", ":"))),
+            )
+
+    def search_vector(self, query_embedding: Iterable[float], *,
+                      tenant_id: str = "default", limit: int = 10,
+                      kinds: Iterable[str] | None = None,
+                      as_of: float | None = None) -> list[SearchHit]:
+        if limit < 1:
+            return []
+        query = self._validated_vector(query_embedding)
+        now = time.time() if as_of is None else as_of
+        kind_values = list(kinds or [])
+        kind_clause = (" AND m.kind IN (" + ",".join("?" for _ in kind_values) + ")") if kind_values else ""
+        with self._lock:
+            rows = self.db.execute(
+                f"""SELECT m.*, e.vector_json FROM embeddings e
+                    JOIN memories m ON m.id=e.memory_id AND m.tenant_id=e.tenant_id
+                    WHERE e.tenant_id=? AND e.dimensions=? AND m.valid_from<=?
+                    AND (m.valid_to IS NULL OR m.valid_to>?) {kind_clause}""",
+                [tenant_id, len(query), now, now, *kind_values],
+            ).fetchall()
+        query_norm = math.sqrt(sum(value * value for value in query))
+        scored: list[tuple[sqlite3.Row, float]] = []
+        for row in rows:
+            vector = json.loads(row["vector_json"])
+            norm = math.sqrt(sum(value * value for value in vector))
+            if norm == 0 or len(vector) != len(query):
+                continue
+            similarity = sum(a * b for a, b in zip(query, vector)) / (query_norm * norm)
+            score = max(-1.0, min(1.0, similarity)) * float(row["confidence"])
+            scored.append((row, score))
+        scored.sort(key=lambda item: (-item[1], -item[0]["created_at"], item[0]["id"]))
+        return [SearchHit(self._to_memory(row), score, ["exact_vector"])
+                for row, score in scored[:limit]]
 
     def get(self, memory_id: str, *, tenant_id: str = "default") -> Memory | None:
         with self._lock:
