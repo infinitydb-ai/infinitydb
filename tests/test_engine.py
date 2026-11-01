@@ -700,3 +700,17 @@ def test_shared_input_validation_conformance_fixture():
     assert empty["results"] == []
     assert empty["tokens_saved"] is None
     db.conn.close()
+
+
+def test_file_backed_database_uses_full_synchronous_mode(tmp_path):
+    db_path = tmp_path / "durability.sqlite"
+    db = InfinityDB(str(db_path))
+    assert db.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert db.conn.execute("PRAGMA synchronous").fetchone()[0] == 2
+    db.add("I prefer durable SQLite commits.", user_id="durability")
+    db.close()
+
+    reopened = InfinityDB(str(db_path))
+    assert reopened.recall("durable", user_id="durability")["results"]
+    assert reopened.conn.execute("PRAGMA synchronous").fetchone()[0] == 2
+    reopened.close()
