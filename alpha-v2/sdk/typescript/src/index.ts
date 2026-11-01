@@ -62,6 +62,24 @@ export class InfinityDBClient {
     });
   }
 
+  searchHybrid(
+    query: string,
+    embedding: number[],
+    tenant_id = "default",
+    limit = 10,
+    kinds: string[] = [],
+    rrf_k = 60,
+  ): Promise<SearchHit[]> {
+    return this.request("/v1/search/hybrid", {
+      query,
+      embedding,
+      tenant_id,
+      limit,
+      kinds,
+      rrf_k,
+    });
+  }
+
   context(query: string, tenant_id = "default", limit = 10): Promise<{
     query: string;
     memories: Array<{ id: string; content: string; kind: string }>;

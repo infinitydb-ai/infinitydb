@@ -242,6 +242,51 @@ class MemoryStore:
         return [SearchHit(self._to_memory(row), score, ["exact_vector"])
                 for row, score in scored[:limit]]
 
+    def search_hybrid(
+        self, query: str, query_embedding: Iterable[float], *,
+        tenant_id: str = "default", limit: int = 10,
+        kinds: Iterable[str] | None = None, as_of: float | None = None,
+        rrf_k: int = 60, candidate_limit: int | None = None,
+    ) -> list[SearchHit]:
+        """Fuse lexical and exact-vector rankings with deterministic RRF.
+
+        Both candidate generators enforce tenant, temporal and kind filters.
+        Scores are reciprocal-rank-fusion scores, not calibrated probabilities.
+        """
+        if limit < 1:
+            return []
+        if rrf_k < 1:
+            raise ValueError("rrf_k must be at least 1")
+        candidates = candidate_limit if candidate_limit is not None else max(limit * 4, 20)
+        if candidates < limit:
+            raise ValueError("candidate_limit must be greater than or equal to limit")
+
+        lexical = self.search(
+            query, tenant_id=tenant_id, limit=candidates, kinds=kinds, as_of=as_of
+        )
+        semantic = self.search_vector(
+            query_embedding, tenant_id=tenant_id, limit=candidates,
+            kinds=kinds, as_of=as_of,
+        )
+        fused: dict[str, tuple[Memory, float, set[str]]] = {}
+        for ranked_hits in (lexical, semantic):
+            for rank, hit in enumerate(ranked_hits, 1):
+                memory_id = hit.memory.id
+                prior = fused.get(memory_id)
+                score = 1.0 / (rrf_k + rank)
+                if prior is None:
+                    fused[memory_id] = (hit.memory, score, set(hit.matched_by))
+                else:
+                    memory, total, methods = prior
+                    methods.update(hit.matched_by)
+                    fused[memory_id] = (memory, total + score, methods)
+        results = [
+            SearchHit(memory, score, sorted(methods))
+            for memory, score, methods in fused.values()
+        ]
+        results.sort(key=lambda hit: (-hit.score, -hit.memory.created_at, hit.memory.id))
+        return results[:limit]
+
     def get(self, memory_id: str, *, tenant_id: str = "default") -> Memory | None:
         with self._lock:
             row = self.db.execute("SELECT * FROM memories WHERE id=? AND tenant_id=?",
