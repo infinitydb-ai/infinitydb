@@ -173,7 +173,7 @@ try {
 const temporal = new InfinityDB();
 const oldLog = temporal.add("I prefer Python for data engineering.", "temporal_user");
 const oldFact = Array.from(temporal.atoms.values()).find(a => a.sourceId === oldLog && a.category === "preference");
-const beforeSupersession = oldFact.ts + 0.001;
+const beforeSupersession = oldFact.ts;
 const newLog = temporal.add("I prefer Rust for systems programming.", "temporal_user");
 const newFact = Array.from(temporal.atoms.values()).find(a => a.sourceId === newLog && a.category === "preference");
 temporal.supersedeFact(oldFact.id, newFact.id, "temporal_user");
