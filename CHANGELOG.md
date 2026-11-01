@@ -68,3 +68,10 @@
 
 All notable changes documented here.
 - chore: update CHANGELOG for v1.0.0 (2026-10-15)
+
+
+## Unreleased — v1.1
+
+- docs: remove unsupported competitor rankings and performance guarantees from public benchmark claims.
+- docs: distinguish local architecture-emulator regression tests from independent product comparisons.
+- docs: document the evidence and reproducibility required for a defensible memory-system leaderboard.
