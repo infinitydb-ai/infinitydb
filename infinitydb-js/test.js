@@ -46,7 +46,8 @@ assert.ok(res2.policies.length >= 1);
 
 // 6. GDPR Delete
 const wipe = db.deleteUser("usr_sarah");
-assert.strictEqual(wipe.gdprCompliant, true);
+assert.ok(wipe.l0LogsDeleted >= 1);
+assert.ok(wipe.l1AtomsDeleted >= 1);
 assert.strictEqual(db.recall("Rust", { userId: "usr_sarah" }).results.length, 0);
 
 
