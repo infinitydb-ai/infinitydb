@@ -21,3 +21,17 @@ The harness deliberately does **not**:
 Results are hardware-, OS-, filesystem-, SQLite-build-, and workload-dependent. Preserve
 the JSON output together with the exact Git commit and environment when publishing a
 measurement. Run repeated trials on an otherwise idle machine before drawing conclusions.
+
+## Node.js SDK benchmark
+
+Run the matching deterministic workload against the Node.js SQLite implementation:
+
+```bash
+node infinitydb-js/benchmark.js --iterations 1000 --output benchmark-results-node.json
+```
+
+The Node.js harness uses the same five fact templates, ten tenant IDs, dataset SHA-256,
+correctness checks, and nearest-rank p50/p95/p99 recall percentiles as the Python harness.
+It reports Node.js and SQLite environment metadata plus the file-backed SQLite footprint.
+The Python and Node.js measurements are separate runs and should not be treated as a
+head-to-head comparison unless performed on the same machine under controlled conditions.
