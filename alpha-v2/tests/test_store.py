@@ -384,7 +384,7 @@ def test_embedding_cache_reuses_vector_for_same_tenant_and_model(store):
 
 
 def test_embedding_cache_is_tenant_isolated(store):
-    provider = FakeEmbeddingProvider([[0.2, 0.8], [0.2, 0.8]])
+    provider = FakeEmbeddingProvider([[0.2, 0.8]])
     store.add_memory_with_embedding("private reusable fact", provider, tenant_id="tenant-a")
     store.add_memory_with_embedding("private reusable fact", provider, tenant_id="tenant-b")
     assert provider.calls == [["private reusable fact"], ["private reusable fact"]]
@@ -392,7 +392,7 @@ def test_embedding_cache_is_tenant_isolated(store):
 
 
 def test_embedding_cache_is_model_revision_and_config_scoped(store):
-    provider = FakeEmbeddingProvider([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
+    provider = FakeEmbeddingProvider([[1.0, 0.0]])
     store.add_memory_with_embedding("versioned fact", provider, tenant_id="versions",
                                     model_revision="r1")
     store.add_memory_with_embedding("versioned fact", provider, tenant_id="versions",
@@ -406,9 +406,9 @@ def test_embedding_cache_is_model_revision_and_config_scoped(store):
 def test_batch_embedding_cache_deduplicates_within_tenant_but_not_across_tenants(store):
     provider = FakeEmbeddingProvider([[1.0, 0.0], [0.0, 1.0]])
     ids = store.add_memories_with_embeddings([
-        {"content": "duplicate batch item", "tenant_id": "same"},
-        {"content": "duplicate batch item", "tenant_id": "same"},
-        {"content": "duplicate batch item", "tenant_id": "different"},
+        {"content": "duplicate batch item", "tenant_id": "same", "valid_from": 1.0},
+        {"content": "duplicate batch item", "tenant_id": "same", "valid_from": 2.0},
+        {"content": "duplicate batch item", "tenant_id": "different", "valid_from": 3.0},
     ], provider)
     assert len(ids) == 3
     assert provider.calls == [["duplicate batch item", "duplicate batch item"]]
