@@ -95,13 +95,15 @@ class InfinityDB {
         this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('schema_version','2')").run();
         this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('sequence',?)").run(String(this._seq));
       })();
-      const ftsVersion = this._storage.prepare("SELECT value FROM infinitydb_meta WHERE key='l1_atoms_fts_version'").get();
-      if (!ftsVersion) {
-        this._storage.prepare("INSERT INTO l1_atoms_fts(l1_atoms_fts) VALUES ('rebuild')").run();
-        this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('l1_atoms_fts_version','1')").run();
-      }
     } else if (version.value !== "2") {
       throw new Error(`Unsupported InfinityDB storage schema version: ${version.value}`);
+    }
+    const ftsVersion = this._storage.prepare("SELECT value FROM infinitydb_meta WHERE key='l1_atoms_fts_version'").get();
+    if (!ftsVersion) {
+      this._storage.transaction(() => {
+        this._storage.prepare("INSERT INTO l1_atoms_fts(l1_atoms_fts) VALUES ('rebuild')").run();
+        this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('l1_atoms_fts_version','1')").run();
+      })();
     }
   }
 
