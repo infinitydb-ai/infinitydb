@@ -41,35 +41,13 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 
 ---
 
-## Benchmark Comparison
+## Benchmark status
 
-Evaluated across 300 test scenarios on identical hardware (Apple M2, 16GB) on PersonaMem, LongMemEval, and LoCoMo datasets.
+**No independent leaderboard ranking is claimed yet.** The benchmark artifacts currently committed to this repository do not support the historical competitor-comparison numbers previously shown here. In particular, the checked-in run reports 0.0 PersonaMem accuracy for InfinityDB, a measured token saving of 63.2% (not 81.4%), and the 2,000-iteration stress artifact reports 8.238 ms p95 recall (not 4.2 ms).
 
-| Model / Architecture | PersonaMem | LongMemEval | LoCoMo | Recall p95 | Token Saving | Memory LLM Cost | Cryptographic Proof |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **InfinityDB (Ours)** | **89.7%** | **88.4%** | **91.2%** | **4.2ms** | **81.4%** | **$0** | **Yes (SHA-256)** |
-| Zep (Graphiti) | 84.2% | 82.1% | 83.5% | 142.0ms | 45.0% | $149/mo | No |
-| TencentDB Agent Memory | 76.0% | 74.3% | 75.1% | 38.2ms | 61.3% | $30/mo | No |
-| Mem0 | 68.5% | 66.9% | 69.2% | 35.4ms | 42.1% | $99/mo | No |
-| Letta / MemGPT | 71.2% | 70.5% | 72.0% | 68.5ms | 38.5% | $45/mo | No |
+The existing benchmark harness includes local architecture emulators; it does not execute the actual TencentDB, Mem0, Zep, or Letta products. Those emulator outputs must not be presented as direct product comparisons.
 
-> **Reproducible:** `python benchmarks/run_benchmark.py` and `python benchmarks/stress_test_2000.py`. Results verified in `benchmarks/benchmark_results.json` and `benchmarks/stress_test_2000_results.json` — 2,000 runs, 10,020 facts, 100% success rate.
-
----
-
-## InfinityDB vs The World
-
-| Capability | InfinityDB | TencentDB | Mem0 | Zep |
-| :--- | :--- | :--- | :--- | :--- |
-| **Recall Latency p95** | **4.2ms** | 38.2ms | 35.4ms | 142ms |
-| **Extraction Cost** | **$0 Zero-LLM** | $30/mo LLM | $99/mo LLM | $149/mo |
-| **Token Saving** | **81.4%** | 61.3% | 42.1% | 45.0% |
-| **Verifiable Proof** | **Yes L6 SHA-256** | No | No | No |
-| **Conflict Resolution** | **Auto-heal L3** | No | No | Partial |
-| **Scale** | **SQLite to Postgres** | SQLite only | Cloud only | Needs Neo4j |
-| **Dashboard** | **Local Interactive** | No | No | No |
-
----
+Until a benchmark is independently reproducible against pinned implementations and datasets, treat performance figures as workload-specific observations—not guarantees or rankings. See [the benchmark integrity audit](docs/BENCHMARK_INTEGRITY_AUDIT.md) and [benchmark reproduction notes](benchmarks/README.md).
 
 ## Architecture: The L0-L6 Memory Pyramid
 

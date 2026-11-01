@@ -1,49 +1,29 @@
 # InfinityDB Benchmark Suite
 
-Independent, reproducible benchmarks comparing **InfinityDB** against **TencentDB Agent Memory**, **Zep (Graphiti)**, **Mem0**, and **Letta (MemGPT)**.
+This repository contains a local benchmark harness for development and regression testing. **It is not currently an independent comparison against the TencentDB, Mem0, Zep, or Letta products.** The comparison classes in `run_benchmark.py` are local architecture emulators and must not be described as measurements of those products.
 
-## Benchmark Results
+## Current checked-in artifacts
 
-Evaluated across **PersonaMem** (100 scenarios with conflicting preference updates), **LongMemEval** (100 multi-turn needle-in-haystack scenarios), and **LoCoMo** (100 causal reasoning scenarios).
+The committed artifacts are historical snapshots, not a release certification:
 
-| Model / Architecture | PersonaMem | LongMemEval | LoCoMo | Recall Latency (p95) | Token Saving | LLM Cost | Cryptographic Proof |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **InfinityDB (Ours)** | **89.7%** | **88.4%** | **91.2%** | **&lt; 5.0ms** | **81.4%** | **$0** (Deterministic) | **Yes (SHA-256)** |
-| Zep (Graphiti) | 84.2% | 82.1% | 83.5% | 142.0ms | 45.0% | $149/mo | No |
-| TencentDB Agent Memory | 76.0% | 74.3% | 75.1% | 38.2ms | 61.3% | $30/mo | No |
-| Mem0 | 68.5% | 66.9% | 69.2% | 35.4ms | 42.1% | $99/mo | No |
-| Letta / MemGPT | 71.2% | 70.5% | 72.0% | 68.5ms | 38.5% | $45/mo | No |
+- `benchmark_results.json` reports InfinityDB PersonaMem accuracy as 0.0, LongMemEval and LoCoMo accuracy as 100.0, and measured token saving as 63.2%.
+- `stress_test_2000_results.json` reports 2,000 recall iterations, 100% success in that run, and p95 recall latency of 8.238 ms.
+- The stress-test result is specific to its recorded environment and workload. It does not establish a universal latency guarantee.
 
-## How to Reproduce
+Do not combine values from different workloads or replace measured values with target values. Preserve raw output and report failed runs.
 
-Run the benchmark suite locally:
+## Run locally
 
 ```bash
+python -m pip install -e ".[dev]"
 python benchmarks/run_benchmark.py
+python benchmarks/stress_test_2000.py
 ```
 
-The script will:
-1. Ingest 300 benchmark dialogues across PersonaMem, LongMemEval, and LoCoMo datasets.
-2. Measure p50 and p95 recall latencies across repeated evaluations.
-3. Verify conflict auto-resolution on PersonaMem scenarios.
-4. Output the full summary table to the console and export JSON data to `benchmarks/benchmark_results.json`.
+The scripts write local result artifacts. Record the commit SHA, Python and dependency versions, operating system, CPU/RAM, dataset revision, random seed, workload size, and command used alongside any result shared publicly.
 
-## Methodology & Metrics
+## Requirements for a fair external comparison
 
-1. **PersonaMem Accuracy**: Evaluates whether the engine accurately remembers user identity, constraints, and dynamically updates when the user states a new preference (conflict resolution).
-2. **LongMemEval**: Measures accuracy in retrieving critical information buried in long multi-turn agent dialogues.
-3. **LoCoMo**: Tests causal reasoning ("X happened because Y") and temporal ordering of facts.
-4. **Token Savings**: Percentage of token usage eliminated from agent context windows by replacing raw conversation dumps with compressed atomic facts and causal graph pointers.
-5. **Recall Latency**: Real end-to-end time to query and retrieve top-k memories.
+Before publishing competitor rankings, each system must run using its actual pinned implementation and documented configuration. Use the same hardware, dataset revision, question set, scoring rules, warm-up policy, concurrency, and repetition count. Report accuracy/recall quality and latency together; include p50, p95, p99, throughput, ingestion cost, storage footprint, and failure counts. Publish raw per-example outputs and scripts so others can reproduce the result.
 
-<!-- verified 89.7% personamem -->
-
-<!-- verified 4.2ms recall -->
-
-<!-- verified 81.4% token saving -->
-
-<!-- validated 2000 runs 10,020 facts 0 errors -->
-
-<!-- measured throughput 776-2007 items/s -->
-
-<!-- reproducibility guide spec -->
+Until those requirements are met, this suite should be used for InfinityDB regression testing only—not as evidence that InfinityDB is number one.

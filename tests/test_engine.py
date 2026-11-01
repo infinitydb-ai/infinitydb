@@ -176,3 +176,48 @@ def test_proof_verification_detects_source_tampering():
     tampered = db.get_proof(atom_id)
     assert tampered is not None
     assert tampered["verified"] is False
+
+
+def test_add_rejects_invalid_inputs():
+    db = InfinityDB()
+    with pytest.raises(ValueError, match="conversation cannot be empty"):
+        db.add("   ")
+    with pytest.raises(ValueError, match="user_id cannot be empty"):
+        db.add("valid conversation", user_id=" ")
+    with pytest.raises(ValueError, match="importance must be between 0 and 1"):
+        db.add("valid conversation", importance=1.1)
+    with pytest.raises(TypeError, match="importance must be a number"):
+        db.add("valid conversation", importance=True)
+
+
+def test_recall_rejects_invalid_limits_and_user_ids():
+    db = InfinityDB()
+    with pytest.raises(ValueError, match="positive integer"):
+        db.recall("python", n=0)
+    with pytest.raises(ValueError, match="positive integer"):
+        db.recall("python", n=-1)
+    with pytest.raises(TypeError, match="n must be a positive integer"):
+        db.recall("python", n=1.5)
+    with pytest.raises(ValueError, match="user_id cannot be empty"):
+        db.recall("python", user_id=" ")
+
+
+def test_empty_recall_query_does_not_return_every_memory():
+    db = InfinityDB()
+    db.add("I prefer Python for backend development.", user_id="empty-query")
+    result = db.recall("   ", user_id="empty-query")
+    assert result["results"] == []
+    assert result["tokens_saved"] is None
+
+
+def test_importance_parameter_scales_extracted_fact_weight():
+    db = InfinityDB()
+    db.add("I prefer Rust.", user_id="low", importance=0.2)
+    db.add("I prefer Rust.", user_id="high", importance=1.0)
+    low = db.conn.execute(
+        "SELECT importance FROM l1_atoms WHERE user_id = ?", ("low",)
+    ).fetchone()["importance"]
+    high = db.conn.execute(
+        "SELECT importance FROM l1_atoms WHERE user_id = ?", ("high",)
+    ).fetchone()["importance"]
+    assert low < high
