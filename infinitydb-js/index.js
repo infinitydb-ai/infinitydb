@@ -689,7 +689,22 @@ class InfinityDB {
     for (const id of policyIds) this.policies.delete(id);
     this.relations = this.relations.filter(r => r.userId !== userId);
 
-    this._persist();
+    // The normalized rows were already deleted in the transaction above.
+    // Advance the persistence baseline without issuing a second write
+    // transaction, so a later persistence failure cannot split deletion
+    // across two commits or leave the snapshot describing deleted rows.
+    if (this._storage) {
+      this._persisted = {
+        logs: this._snapshotMap(this.logs),
+        atoms: this._snapshotMap(this.atoms),
+        episodes: this._snapshotMap(this.episodes),
+        personas: this._snapshotMap(this.personas),
+        policies: this._snapshotMap(this.policies),
+        proofs: this._snapshotMap(this.proofs),
+        legacyMemories: this._snapshotMap(this.legacyMemories),
+        relations: new Set(this.relations.map(r => `${r.oldAtomId}\\0${r.newAtomId}`)),
+      };
+    }
     return {
       l0LogsDeleted: c0,
       l1AtomsDeleted: c1,
