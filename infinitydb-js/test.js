@@ -252,4 +252,22 @@ assert.strictEqual(temporalReopened.relations.length, 0);
 temporalReopened.close();
 fs.rmSync(temporalDir, { recursive: true, force: true });
 
+// 15. Fallback extraction preserves exact L0 source ranges for L6 proofs.
+const fallback = new InfinityDB();
+const fallbackConversation = "   The deployment uses isolated build workers. A separate staging environment validates every release!";
+const fallbackLog = fallback.add(fallbackConversation, "fallback_user");
+const fallbackAtoms = Array.from(fallback.atoms.values()).filter(atom => atom.sourceId === fallbackLog);
+assert.strictEqual(fallbackAtoms.length, 2);
+for (const atom of fallbackAtoms) {
+  const fallbackProof = fallback.getProof(atom.id);
+  assert.strictEqual(fallbackProof.verified, true);
+  assert.strictEqual(
+    fallback.logs.get(fallbackLog).raw.slice(...fallbackProof.charRange),
+    atom.fact
+  );
+}
+assert.strictEqual(fallbackAtoms[0].fact, "The deployment uses isolated build workers");
+assert.strictEqual(fallbackAtoms[1].fact, "A separate staging environment validates every release");
+fallback.close();
+
 console.log("[PASS] All JavaScript tests passed successfully!");

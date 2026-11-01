@@ -360,13 +360,23 @@ class InfinityDB {
     }
 
     if (!extractedAny) {
-      const sentences = conversation.split(/[.!?\n]/).map(s => s.trim()).filter(s => s.length > 8);
-      for (const s of sentences.slice(0, 3)) {
-        const atomId = `L1_${this._sha256(logId + s).slice(0, 16)}`;
+      // Store offsets for the exact trimmed sentence so L6 verifies the
+      // original source range rather than an unrelated prefix of the log.
+      const sentencePattern = /[^.!?\n]+/g;
+      let sentenceMatch;
+      let extractedCount = 0;
+      while ((sentenceMatch = sentencePattern.exec(conversation)) !== null && extractedCount < 3) {
+        const rawSentence = sentenceMatch[0];
+        const leadingWhitespace = rawSentence.length - rawSentence.trimStart().length;
+        const fact = rawSentence.trim();
+        if (fact.length <= 8) continue;
+        const charStart = sentenceMatch.index + leadingWhitespace;
+        const charEnd = charStart + fact.length;
+        const atomId = `L1_${this._sha256(logId + fact).slice(0, 16)}`;
         this.atoms.set(atomId, {
           id: atomId,
           userId,
-          fact: s,
+          fact,
           category: "general",
           sourceId: logId,
           importance: 0.75 * importance,
@@ -375,13 +385,14 @@ class InfinityDB {
         });
         this.proofs.set(atomId, {
           atomId,
-          hash: this._sha256(s + logId),
+          hash: this._sha256(fact + logId),
           sourceLogId: logId,
-          rawSnippet: s,
-          charStart: 0,
-          charEnd: s.length,
+          rawSnippet: conversation.slice(Math.max(0, charStart - 20), Math.min(conversation.length, charEnd + 20)),
+          charStart,
+          charEnd,
           ts: now,
         });
+        extractedCount++;
       }
     }
 
