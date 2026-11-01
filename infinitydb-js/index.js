@@ -137,7 +137,6 @@ class InfinityDB {
       this._writeEntries("l4_policies", "id", Array.from(this.policies.values()), v => [v.id, JSON.stringify(v)]);
       this._writeEntries("l6_proofs", "atom_id", Array.from(this.proofs.values()), v => [v.atomId, v.sourceLogId, JSON.stringify(v)]);
       this._writeEntries("legacy_memories", "memory_key", Array.from(this.legacyMemories.entries()), v => [v[0], JSON.stringify(v[1])]);
-      this._storage.prepare("UPDATE infinitydb_meta SET value=? WHERE key='sequence'").run(String(this._seq));
     })();
   }
 
