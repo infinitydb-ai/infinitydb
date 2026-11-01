@@ -578,3 +578,60 @@ assert.strictEqual(policyRollbackReopened.policies.get(originalPolicyId).priorit
 assert.strictEqual(policyRollbackReopened.get("rollback:key"), null);
 policyRollbackReopened.close();
 fs.rmSync(policyRollbackDir, { recursive: true, force: true });
+
+
+// Legacy put must commit its L0-L6 extraction and key-value row as one SQLite write.
+const putAtomicDir = fs.mkdtempSync(path.join(os.tmpdir(), "infinitydb-put-atomic-"));
+const putAtomicPath = path.join(putAtomicDir, "put-atomic.sqlite");
+const putAtomicDb = new InfinityDB({ dbPath: putAtomicPath });
+putAtomicDb.add("An existing independent memory remains.", "put_atomic_user");
+const putAtomicBefore = {
+  logs: putAtomicDb.logs.size,
+  atoms: putAtomicDb.atoms.size,
+  episodes: putAtomicDb.episodes.size,
+  personas: putAtomicDb.personas.size,
+  proofs: putAtomicDb.proofs.size,
+  legacyMemories: putAtomicDb.legacyMemories.size,
+};
+putAtomicDb._storage.exec(`
+  CREATE TRIGGER reject_legacy_put
+  BEFORE INSERT ON legacy_memories
+  BEGIN
+    SELECT RAISE(ABORT, 'simulated legacy put failure');
+  END;
+`);
+assert.throws(
+  () => putAtomicDb.put("atomic:key", "I prefer atomic memory writes."),
+  /simulated legacy put failure/
+);
+assert.strictEqual(putAtomicDb.logs.size, putAtomicBefore.logs);
+assert.strictEqual(putAtomicDb.atoms.size, putAtomicBefore.atoms);
+assert.strictEqual(putAtomicDb.episodes.size, putAtomicBefore.episodes);
+assert.strictEqual(putAtomicDb.personas.size, putAtomicBefore.personas);
+assert.strictEqual(putAtomicDb.proofs.size, putAtomicBefore.proofs);
+assert.strictEqual(putAtomicDb.legacyMemories.size, putAtomicBefore.legacyMemories);
+assert.strictEqual(putAtomicDb.get("atomic:key"), null);
+assert.strictEqual(
+  putAtomicDb._storage.prepare("SELECT count(*) AS count FROM l0_logs").get().count,
+  putAtomicBefore.logs
+);
+assert.strictEqual(
+  putAtomicDb._storage.prepare("SELECT count(*) AS count FROM l1_atoms").get().count,
+  putAtomicBefore.atoms
+);
+assert.strictEqual(
+  putAtomicDb._storage.prepare("SELECT count(*) AS count FROM legacy_memories").get().count,
+  0
+);
+putAtomicDb._storage.exec("DROP TRIGGER reject_legacy_put");
+const atomicMem = putAtomicDb.put("atomic:key", "I prefer atomic memory writes.");
+assert.strictEqual(putAtomicDb.get("atomic:key").content, atomicMem.content);
+const atomicLogCount = putAtomicDb.logs.size;
+const atomicAtomCount = putAtomicDb.atoms.size;
+putAtomicDb.close();
+const putAtomicReopened = new InfinityDB({ dbPath: putAtomicPath });
+assert.strictEqual(putAtomicReopened.logs.size, atomicLogCount);
+assert.strictEqual(putAtomicReopened.atoms.size, atomicAtomCount);
+assert.strictEqual(putAtomicReopened.get("atomic:key").content, "I prefer atomic memory writes.");
+putAtomicReopened.close();
+fs.rmSync(putAtomicDir, { recursive: true, force: true });
