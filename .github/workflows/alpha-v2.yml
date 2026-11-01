@@ -22,6 +22,17 @@ jobs:
         working-directory: alpha-v2
       - run: pytest -q
         working-directory: alpha-v2
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+        working-directory: alpha-v2/sdk/typescript
+      - run: npm test
+        working-directory: alpha-v2/sdk/typescript
   rust:
     runs-on: ubuntu-latest
     steps:
