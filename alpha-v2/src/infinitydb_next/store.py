@@ -157,7 +157,19 @@ class MemoryStore:
 
     def add_edge(self, src_id: str, dst_id: str, relation: str, *,
                  tenant_id: str = "default", weight: float = 1.0) -> None:
+        if not src_id or not dst_id:
+            raise ValueError("source and destination IDs must not be empty")
+        if not relation or not relation.strip():
+            raise ValueError("relation must not be empty")
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError("weight must be a finite non-negative number")
         with self._lock, self.db:
+            rows = self.db.execute(
+                "SELECT id FROM memories WHERE tenant_id=? AND id IN (?,?)",
+                (tenant_id, src_id, dst_id),
+            ).fetchall()
+            if len({row["id"] for row in rows}) != 2:
+                raise ValueError("both edge endpoints must exist in the specified tenant")
             self.db.execute("INSERT OR REPLACE INTO edges VALUES(?,?,?,?,?)",
                             (tenant_id, src_id, dst_id, relation, weight))
 
