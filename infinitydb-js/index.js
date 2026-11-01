@@ -23,61 +23,121 @@ class InfinityDB {
       this._storage = new Database(options.dbPath);
       this._storage.pragma("journal_mode = WAL");
       this._storage.pragma("synchronous = FULL");
-      this._storage.exec(`
-        CREATE TABLE IF NOT EXISTS infinitydb_state (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          schema_version INTEGER NOT NULL,
-          payload TEXT NOT NULL,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
+      this._storage.pragma("busy_timeout = 5000");
+      this._initStorage();
     }
-    this.logs = new Map(); // L0: id -> { id, userId, sessionId, raw, ts }
-    this.atoms = new Map(); // L1: id -> { id, userId, fact, category, sourceId, importance, accessCount, ts }
-    this.episodes = new Map(); // L2: id -> { id, userId, cause, effect, relation, sourceId, ts }
-    this.personas = new Map(); // L3: `${userId}:${key}` -> { userId, key, value, confidence, updatedAt, sourceAtomId }
-    this.policies = new Map(); // L4: id -> { id, rule, domain, priority, createdAt }
-    this.proofs = new Map(); // L6: atomId -> { atomId, hash, sourceLogId, rawSnippet, charStart, charEnd, ts }
-    this.legacyMemories = new Map(); // Legacy put/get
+    this.logs = new Map();
+    this.atoms = new Map();
+    this.episodes = new Map();
+    this.personas = new Map();
+    this.policies = new Map();
+    this.proofs = new Map();
+    this.legacyMemories = new Map();
     this._loadState();
+  }
+
+  _initStorage() {
+    this._storage.exec(`
+      CREATE TABLE IF NOT EXISTS infinitydb_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS l0_logs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_js_l0_user ON l0_logs(user_id);
+      CREATE TABLE IF NOT EXISTS l1_atoms (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_id TEXT NOT NULL, fact TEXT NOT NULL, ts REAL NOT NULL, payload TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_js_l1_user_ts ON l1_atoms(user_id, ts);
+      CREATE INDEX IF NOT EXISTS idx_js_l1_source ON l1_atoms(source_id);
+      CREATE TABLE IF NOT EXISTS l2_episodes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source_id TEXT NOT NULL, payload TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_js_l2_user ON l2_episodes(user_id);
+      CREATE TABLE IF NOT EXISTS l3_personas (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, payload TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_js_l3_user ON l3_personas(user_id);
+      CREATE TABLE IF NOT EXISTS l4_policies (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS l6_proofs (atom_id TEXT PRIMARY KEY, source_log_id TEXT NOT NULL, payload TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_js_l6_source ON l6_proofs(source_log_id);
+      CREATE TABLE IF NOT EXISTS legacy_memories (memory_key TEXT PRIMARY KEY, payload TEXT NOT NULL);
+    `);
+    const version = this._storage.prepare("SELECT value FROM infinitydb_meta WHERE key='schema_version'").get();
+    if (!version) {
+      const legacyTable = this._storage.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='infinitydb_state'").get();
+      this._storage.transaction(() => {
+        if (legacyTable) {
+          const row = this._storage.prepare("SELECT schema_version, payload FROM infinitydb_state WHERE id=1").get();
+          if (row) {
+            if (row.schema_version !== 1) throw new Error(`Unsupported InfinityDB storage schema version: ${row.schema_version}`);
+            const state = JSON.parse(row.payload);
+            this._seq = state.seq || 0;
+            this._writeEntries("l0_logs", "id", state.logs || [], entry => [entry[1].id, entry[1].userId, JSON.stringify(entry[1])]);
+            this._writeEntries("l1_atoms", "id", state.atoms || [], entry => [entry[1].id, entry[1].userId, entry[1].sourceId, entry[1].fact, entry[1].ts, JSON.stringify(entry[1])]);
+            this._writeEntries("l2_episodes", "id", state.episodes || [], entry => [entry[1].id, entry[1].userId, entry[1].sourceId, JSON.stringify(entry[1])]);
+            this._writeEntries("l3_personas", "id", state.personas || [], entry => [entry[0], entry[1].userId, JSON.stringify(entry[1])]);
+            this._writeEntries("l4_policies", "id", state.policies || [], entry => [entry[1].id, JSON.stringify(entry[1])]);
+            this._writeEntries("l6_proofs", "atom_id", state.proofs || [], entry => [entry[1].atomId, entry[1].sourceLogId, JSON.stringify(entry[1])]);
+            this._writeEntries("legacy_memories", "memory_key", state.legacyMemories || [], v => [v[0], JSON.stringify(v[1])]);
+          }
+          this._storage.exec("DROP TABLE infinitydb_state");
+        }
+        this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('schema_version','2')").run();
+        this._storage.prepare("INSERT INTO infinitydb_meta(key,value) VALUES ('sequence',?)").run(String(this._seq));
+      })();
+    } else if (version.value !== "2") {
+      throw new Error(`Unsupported InfinityDB storage schema version: ${version.value}`);
+    }
+  }
+
+  _writeEntries(table, keyColumn, entries, mapper) {
+    const columns = {
+      l0_logs: "id, user_id, payload", l1_atoms: "id, user_id, source_id, fact, ts, payload",
+      l2_episodes: "id, user_id, source_id, payload", l3_personas: "id, user_id, payload",
+      l4_policies: "id, payload", l6_proofs: "atom_id, source_log_id, payload",
+      legacy_memories: "memory_key, payload",
+    }[table];
+    const values = columns.split(", ").map(() => "?").join(", ");
+    const updates = columns.split(", ").slice(1).map(col => `${col}=excluded.${col}`).join(", ");
+    const stmt = this._storage.prepare(`INSERT INTO ${table} (${columns}) VALUES (${values}) ON CONFLICT(${keyColumn}) DO UPDATE SET ${updates}`);
+    for (const entry of entries) stmt.run(...mapper(entry));
   }
 
   _loadState() {
     if (!this._storage) return;
-    const row = this._storage.prepare(
-      "SELECT schema_version, payload FROM infinitydb_state WHERE id = 1"
-    ).get();
-    if (!row) return;
-    if (row.schema_version !== 1) {
-      throw new Error(`Unsupported InfinityDB storage schema version: ${row.schema_version}`);
-    }
-    const state = JSON.parse(row.payload);
-    this._seq = state.seq || 0;
-    for (const key of ["logs", "atoms", "episodes", "personas", "policies", "proofs", "legacyMemories"]) {
-      if (Array.isArray(state[key])) this[key] = new Map(state[key]);
-    }
+    const get = (sql, key) => this._storage.prepare(sql).all().map(row => [row[key], JSON.parse(row.payload)]);
+    this._seq = Number(this._storage.prepare("SELECT value FROM infinitydb_meta WHERE key='sequence'").get()?.value || 0);
+    this.logs = new Map(get("SELECT id, payload FROM l0_logs", "id"));
+    this.atoms = new Map(get("SELECT id, payload FROM l1_atoms", "id"));
+    this.episodes = new Map(get("SELECT id, payload FROM l2_episodes", "id"));
+    this.personas = new Map(get("SELECT id, payload FROM l3_personas", "id"));
+    this.policies = new Map(get("SELECT id, payload FROM l4_policies", "id"));
+    this.proofs = new Map(get("SELECT atom_id AS id, payload FROM l6_proofs", "id"));
+    this.legacyMemories = new Map(get("SELECT memory_key AS id, payload FROM legacy_memories", "id"));
+  }
+
+  _refreshState() {
+    if (this._storage) this._loadState();
+  }
+
+  _allocateSequence() {
+    if (!this._storage) return ++this._seq;
+    const allocate = this._storage.transaction(() => {
+      const current = Number(this._storage.prepare(
+        "SELECT value FROM infinitydb_meta WHERE key='sequence'"
+      ).get()?.value || 0);
+      const next = current + 1;
+      this._storage.prepare(
+        "UPDATE infinitydb_meta SET value=? WHERE key='sequence'"
+      ).run(String(next));
+      return next;
+    });
+    this._seq = allocate();
+    return this._seq;
   }
 
   _persist() {
     if (!this._storage) return;
-    const payload = JSON.stringify({
-      seq: this._seq,
-      logs: Array.from(this.logs.entries()),
-      atoms: Array.from(this.atoms.entries()),
-      episodes: Array.from(this.episodes.entries()),
-      personas: Array.from(this.personas.entries()),
-      policies: Array.from(this.policies.entries()),
-      proofs: Array.from(this.proofs.entries()),
-      legacyMemories: Array.from(this.legacyMemories.entries()),
-    });
-    this._storage.prepare(`
-      INSERT INTO infinitydb_state (id, schema_version, payload, updated_at)
-      VALUES (1, 1, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(id) DO UPDATE SET
-        schema_version = excluded.schema_version,
-        payload = excluded.payload,
-        updated_at = excluded.updated_at
-    `).run(payload);
+    this._storage.transaction(() => {
+      this._writeEntries("l0_logs", "id", Array.from(this.logs.values()), v => [v.id, v.userId, JSON.stringify(v)]);
+      this._writeEntries("l1_atoms", "id", Array.from(this.atoms.values()), v => [v.id, v.userId, v.sourceId, v.fact, v.ts, JSON.stringify(v)]);
+      this._writeEntries("l2_episodes", "id", Array.from(this.episodes.values()), v => [v.id, v.userId, v.sourceId, JSON.stringify(v)]);
+      this._writeEntries("l3_personas", "id", Array.from(this.personas.entries()), v => [v[0], v[1].userId, JSON.stringify(v[1])]);
+      this._writeEntries("l4_policies", "id", Array.from(this.policies.values()), v => [v.id, JSON.stringify(v)]);
+      this._writeEntries("l6_proofs", "atom_id", Array.from(this.proofs.values()), v => [v.atomId, v.sourceLogId, JSON.stringify(v)]);
+      this._writeEntries("legacy_memories", "memory_key", Array.from(this.legacyMemories.entries()), v => [v[0], JSON.stringify(v[1])]);
+    })();
   }
 
   close() {
@@ -90,27 +150,32 @@ class InfinityDB {
 
   // Legacy key-value compatibility
   put(key, content) {
+    this._refreshState();
     if (!key || !key.trim()) throw new Error("key cannot be empty");
     if (!content || !content.trim()) throw new Error("content cannot be empty");
     const mem = { key, content, createdAt: new Date().toISOString() };
-    this.legacyMemories.set(key, mem);
     this.add(`Memory key ${key}: ${content}`, "legacy");
+    this.legacyMemories.set(key, mem);
     this._persist();
     return mem;
   }
 
   get(key) {
+    this._refreshState();
     return this.legacyMemories.get(key) || null;
   }
 
   delete(key) {
+    this._refreshState();
     const deleted = this.legacyMemories.delete(key);
+    if (deleted && this._storage) this._storage.prepare("DELETE FROM legacy_memories WHERE memory_key=?").run(key);
     if (deleted) this._persist();
     return deleted;
   }
 
   // Core L0-L6 API
   add(conversation, userId = "default", sessionId = null, importance = 0.9) {
+    this._refreshState();
     if (typeof conversation !== "string" || !conversation.trim()) {
       throw new TypeError("conversation must be a non-empty string");
     }
@@ -124,7 +189,7 @@ class InfinityDB {
       throw new RangeError("importance must be between 0 and 1");
     }
     const now = Date.now() / 1000;
-    this._seq += 1;
+    this._allocateSequence();
     const logId = `L0_${this._sha256(conversation + now + this._seq).slice(0, 16)}`;
 
     // L0: Store raw
@@ -246,6 +311,7 @@ class InfinityDB {
   }
 
   recall(query, options = {}) {
+    this._refreshState();
     if (typeof query !== "string") throw new TypeError("query must be a string");
     const n = options.n === undefined ? 5 : options.n;
     if (!Number.isInteger(n) || n <= 0) {
@@ -339,6 +405,7 @@ class InfinityDB {
   }
 
   getProof(atomId) {
+    this._refreshState();
     const p = this.proofs.get(atomId);
     if (!p) return null;
     const source = this.logs.get(p.sourceLogId);
@@ -368,6 +435,7 @@ class InfinityDB {
   }
 
   getPersona(userId = "default") {
+    this._refreshState();
     const out = {};
     for (const [key, p] of this.personas.entries()) {
       if (p.userId === userId) {
@@ -378,6 +446,7 @@ class InfinityDB {
   }
 
   addPolicy(rule, domain = "general", priority = 1.0) {
+    this._refreshState();
     const pid = `L4_${this._sha256(rule + domain).slice(0, 12)}`;
     this.policies.set(pid, { id: pid, rule, domain, priority, createdAt: Date.now() / 1000 });
     this._persist();
@@ -400,6 +469,7 @@ class InfinityDB {
   }
 
   deleteUser(userId) {
+    this._refreshState();
     let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
     for (const [id, log] of Array.from(this.logs.entries())) {
       if (log.userId === userId) { this.logs.delete(id); c0++; }
@@ -417,6 +487,15 @@ class InfinityDB {
     for (const [key, p] of Array.from(this.personas.entries())) {
       if (p.userId === userId) { this.personas.delete(key); c3++; }
     }
+    if (this._storage) {
+      this._storage.transaction(() => {
+        this._storage.prepare("DELETE FROM l0_logs WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l1_atoms WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l2_episodes WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l3_personas WHERE user_id=?").run(userId);
+        this._storage.prepare("DELETE FROM l6_proofs WHERE source_log_id NOT IN (SELECT id FROM l0_logs)").run();
+      })();
+    }
     this._persist();
     return {
       l0LogsDeleted: c0,
@@ -428,6 +507,7 @@ class InfinityDB {
   }
 
   stats() {
+    this._refreshState();
     return {
       l0RawLogs: this.logs.size,
       l1AtomFacts: this.atoms.size,

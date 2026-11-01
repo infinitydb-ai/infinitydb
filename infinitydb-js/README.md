@@ -125,10 +125,13 @@ db.close();
 ```
 
 When `dbPath` is omitted, the SDK remains in-memory for backwards compatibility.
-The SQLite-backed mode uses WAL and FULL synchronous commits. The current implementation
-persists an atomic versioned state snapshot per mutation; it is intended for durable
-single-process deployments, not concurrent multi-process writers or large-scale workloads.
-Back up the database together with its SQLite WAL state using SQLite's backup facilities.
+The SQLite-backed mode uses WAL, FULL synchronous commits, a busy timeout, and normalized
+L0/L1/L2/L3/L4/L6 tables with transactional row upserts. Existing v1 JSON-snapshot databases
+are migrated transactionally to schema v2 on first open. SDK instances refresh their view
+from SQLite before public reads and mutations, and sequence allocation is serialized by a
+SQLite write transaction. This is not yet a guarantee of serializable concurrent read-modify-write
+operations across processes; use a single writer until that coordination layer is added.
+Back up the database using SQLite's backup facilities.
 
 ---
 
