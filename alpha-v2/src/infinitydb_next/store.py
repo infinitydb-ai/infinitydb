@@ -184,7 +184,7 @@ class MemoryStore:
         metadata: dict[str, Any] | None = None, source_id: str | None = None,
         raw_evidence: str | None = None, confidence: float = 1.0,
         valid_from: float | None = None, valid_to: float | None = None,
-        memory_id: str | None = None,
+        memory_id: str | None = None, model_revision: str | None = None,
     ) -> str:
         """Embed and persist one memory; provider I/O happens before the DB transaction."""
         if not content or not content.strip():
@@ -193,7 +193,10 @@ class MemoryStore:
         if len(vectors) != 1:
             raise ValueError("embedding provider must return exactly one vector")
         vector = self._validated_vector(vectors[0])
-        provider_name, model_name, revision = self._provider_identity(provider)
+        provider_name, model_name, _ = self._provider_identity(provider)
+        revision = model_revision
+        if revision is not None and not revision.strip():
+            raise ValueError("model_revision must be non-empty when provided")
         if not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError("confidence must be between 0 and 1")
         now = time.time()
@@ -221,7 +224,8 @@ class MemoryStore:
         return mid
 
     def add_memories_with_embeddings(
-        self, items: Iterable[dict[str, Any]], provider: EmbeddingProvider,
+        self, items: Iterable[dict[str, Any]], provider: EmbeddingProvider, *,
+        model_revision: str | None = None,
     ) -> list[str]:
         """Batch-embed first, then atomically persist all memories and vectors."""
         batch = list(items)
@@ -236,7 +240,10 @@ class MemoryStore:
         validated = [self._validated_vector(vector) for vector in vectors]
         if len({len(vector) for vector in validated}) != 1:
             raise ValueError("embedding provider returned inconsistent dimensions")
-        provider_name, model_name, revision = self._provider_identity(provider)
+        provider_name, model_name, _ = self._provider_identity(provider)
+        revision = model_revision
+        if revision is not None and not revision.strip():
+            raise ValueError("model_revision must be non-empty when provided")
         now = time.time()
         memory_rows: list[tuple[Any, ...]] = []
         embedding_rows: list[tuple[Any, ...]] = []
