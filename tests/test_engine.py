@@ -346,3 +346,76 @@ def test_l4_policy_schema_migrates_legacy_global_policies(tmp_path):
     }
     assert "tenant_id" in columns
     migrated.conn.close()
+
+
+def test_temporal_supersession_preserves_history_and_supports_as_of_recall():
+    db = InfinityDB()
+    old_log = db.add("I prefer Python for backend systems.", user_id="temporal-user")
+    old_atom = db.conn.execute(
+        "SELECT id, ts FROM l1_atoms WHERE source_id = ?", (old_log,)
+    ).fetchone()
+    historical_cutoff = old_atom["ts"] + 0.000001
+
+    new_log = db.add("I prefer Rust for backend systems.", user_id="temporal-user")
+    new_atom = db.conn.execute(
+        "SELECT id FROM l1_atoms WHERE source_id = ?", (new_log,)
+    ).fetchone()
+    relation_id = db.supersede_fact(
+        old_atom["id"], new_atom["id"], "temporal-user"
+    )
+
+    assert relation_id
+    current = db.recall("backend systems", user_id="temporal-user")
+    assert len(current["results"]) == 1
+    assert "Rust" in current["results"][0]["fact"]
+
+    historical = db.recall(
+        "backend systems", user_id="temporal-user", as_of=historical_cutoff
+    )
+    assert len(historical["results"]) == 1
+    assert "Python" in historical["results"][0]["fact"]
+
+    # Supersession never deletes the original fact or its proof.
+    assert db.conn.execute(
+        "SELECT 1 FROM l1_atoms WHERE id = ?", (old_atom["id"],)
+    ).fetchone()
+    assert db.get_proof(old_atom["id"])["verified"] is True
+
+
+def test_supersession_validates_tenant_and_prevents_cycles():
+    db = InfinityDB()
+    log_a = db.add("I prefer Python.", user_id="tenant-a")
+    log_b = db.add("I prefer Rust.", user_id="tenant-a")
+    log_c = db.add("I prefer Go.", user_id="tenant-a")
+    atom = lambda log_id: db.conn.execute(
+        "SELECT id FROM l1_atoms WHERE source_id = ?", (log_id,)
+    ).fetchone()["id"]
+    a, b, c = atom(log_a), atom(log_b), atom(log_c)
+
+    with pytest.raises(ValueError, match="supplied user_id"):
+        db.supersede_fact(a, b, "tenant-b")
+    with pytest.raises(ValueError, match="exist"):
+        db.supersede_fact(a, "missing-atom", "tenant-a")
+
+    db.supersede_fact(a, b, "tenant-a")
+    db.supersede_fact(b, c, "tenant-a")
+    with pytest.raises(ValueError, match="cycle"):
+        db.supersede_fact(c, a, "tenant-a")
+
+
+def test_temporal_recall_validates_as_of_and_user_deletion_removes_relations():
+    db = InfinityDB()
+    log_a = db.add("I prefer Python.", user_id="temporal-delete")
+    log_b = db.add("I prefer Rust.", user_id="temporal-delete")
+    atom = lambda log_id: db.conn.execute(
+        "SELECT id FROM l1_atoms WHERE source_id = ?", (log_id,)
+    ).fetchone()["id"]
+    db.supersede_fact(atom(log_a), atom(log_b), "temporal-delete")
+
+    with pytest.raises(ValueError, match="finite Unix timestamp"):
+        db.recall("Python", user_id="temporal-delete", as_of=float("nan"))
+
+    db.delete_user("temporal-delete")
+    assert db.conn.execute(
+        "SELECT count(*) FROM l1_atom_relations"
+    ).fetchone()[0] == 0
