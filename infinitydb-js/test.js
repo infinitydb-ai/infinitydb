@@ -110,3 +110,56 @@ try {
 console.log("[PASS] All JavaScript tests passed successfully!");
 
 // sdk tests
+
+
+// 11. Normalized schema, legacy snapshot migration, and cross-instance visibility.
+const schemaDb = require("better-sqlite3");
+const normalizedPath = path.join(tempDir, "normalized.sqlite");
+try {
+  const first = new InfinityDB({ dbPath: normalizedPath });
+  const second = new InfinityDB({ dbPath: normalizedPath });
+  const firstLog = first.add("I prefer PostgreSQL for production storage.", "shared_user");
+  assert.ok(second.recall("PostgreSQL", { userId: "shared_user" }).results.length > 0);
+  const secondLog = second.add("I prefer Redis for cache workloads.", "shared_user");
+  assert.ok(first.recall("Redis", { userId: "shared_user" }).results.length > 0);
+  first.close();
+  second.close();
+
+  const raw = new schemaDb(normalizedPath);
+  const tables = raw.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+  ).all().map(row => row.name);
+  assert.ok(tables.includes("l0_logs"));
+  assert.ok(tables.includes("l1_atoms"));
+  assert.ok(tables.includes("l6_proofs"));
+  assert.ok(!tables.includes("infinitydb_state"));
+  assert.strictEqual(raw.prepare("SELECT count(*) AS n FROM l0_logs").get().n, 2);
+  raw.close();
+
+  // Simulate a v1 snapshot database and ensure it migrates without data loss.
+  const legacyPath = path.join(tempDir, "legacy-v1.sqlite");
+  const legacy = new schemaDb(legacyPath);
+  legacy.exec("CREATE TABLE infinitydb_state (id INTEGER PRIMARY KEY, schema_version INTEGER NOT NULL, payload TEXT NOT NULL, updated_at TEXT)");
+  const legacyState = {
+    seq: 7,
+    logs: [[ "log_old", { id: "log_old", userId: "old_user", sessionId: null, raw: "I prefer SQLite.", ts: 1 } ]],
+    atoms: [[ "atom_old", { id: "atom_old", userId: "old_user", fact: "I prefer SQLite.", category: "preference", sourceId: "log_old", importance: 0.9, accessCount: 0, ts: 1 } ]],
+    episodes: [], personas: [], policies: [],
+    proofs: [[ "atom_old", { atomId: "atom_old", hash: "hash", sourceLogId: "log_old", rawSnippet: "I prefer SQLite.", charStart: 0, charEnd: 16, ts: 1 } ]],
+    legacyMemories: []
+  };
+  legacy.prepare("INSERT INTO infinitydb_state VALUES (1, 1, ?, CURRENT_TIMESTAMP)").run(JSON.stringify(legacyState));
+  legacy.close();
+  const migrated = new InfinityDB({ dbPath: legacyPath });
+  assert.ok(migrated.logs.has("log_old"));
+  assert.ok(migrated.atoms.has("atom_old"));
+  assert.strictEqual(migrated._seq, 7);
+  migrated.add("I prefer Rust.", "old_user");
+  migrated.close();
+  const migratedRaw = new schemaDb(legacyPath);
+  assert.strictEqual(migratedRaw.prepare("SELECT value FROM infinitydb_meta WHERE key='schema_version'").get().value, "2");
+  assert.strictEqual(migratedRaw.prepare("SELECT count(*) AS n FROM l0_logs").get().n, 2);
+  migratedRaw.close();
+} finally {
+  // Parent test cleanup runs after all database handles are closed.
+}
