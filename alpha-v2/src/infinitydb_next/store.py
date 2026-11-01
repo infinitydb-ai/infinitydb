@@ -209,7 +209,7 @@ class MemoryStore:
                 for operator in (" AND ", " OR "):
                     match = operator.join(quoted)
                     sql = f"""SELECT m.* FROM memory_fts_v2 f JOIN memories m ON m.id=f.memory_id
-                        WHERE f MATCH ? AND f.tenant_key=? AND m.tenant_id=?
+                        WHERE memory_fts_v2 MATCH ? AND f.tenant_key=? AND m.tenant_id=?
                         AND m.valid_from<=? AND (m.valid_to IS NULL OR m.valid_to>?)
                         {kind_clause} ORDER BY f.rowid DESC LIMIT ?"""
                     params: list[Any] = [match, self._tenant_key(tenant_id), tenant_id, now, now]
