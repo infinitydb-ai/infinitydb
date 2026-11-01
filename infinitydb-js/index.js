@@ -610,13 +610,24 @@ class InfinityDB {
     scored.sort((a, b) => b.score - a.score);
     const topK = scored.slice(0, n);
 
-    // Reinforce access count
+    // Reinforce access count only when the updated counts are durable.
+    const previousAccessCounts = [];
     for (const item of topK) {
       const at = this.atoms.get(item.id);
-      if (at) at.accessCount++;
+      if (at) {
+        previousAccessCounts.push([at, at.accessCount]);
+        at.accessCount++;
+      }
     }
 
-    this._persist();
+    try {
+      this._persist();
+    } catch (error) {
+      for (const [atom, accessCount] of previousAccessCounts) {
+        atom.accessCount = accessCount;
+      }
+      throw error;
+    }
 
     // Causal graph insights
     const causalGraph = [];
