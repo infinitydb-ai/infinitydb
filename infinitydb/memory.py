@@ -80,6 +80,17 @@ class AgentMemory:
         """Remove stored memory data for a user from the configured database."""
         return self.db.delete_user(user_id=user_id)
 
+    def close(self) -> None:
+        """Close the underlying SQLite connection."""
+        self.db.close()
+
+    def __enter__(self) -> "AgentMemory":
+        """Allow deterministic cleanup with a context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.close()
+
     def stats(self) -> dict[str, Any]:
         """Return statistics across L0-L6 memory layers."""
         return self.db.stats()

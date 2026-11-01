@@ -770,6 +770,17 @@ class InfinityDB:
             "l4_tenant_policies_deleted": c4,
         }
 
+    def close(self) -> None:
+        """Close the SQLite connection and release its file and WAL handles."""
+        self.conn.close()
+
+    def __enter__(self) -> "InfinityDB":
+        """Allow deterministic connection cleanup with a context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.close()
+
     def stats(self) -> dict[str, Any]:
         """Return system-wide statistics for L0-L6 memory layers."""
         l0_count = self.conn.execute("SELECT count(*) FROM l0_logs").fetchone()[0]
