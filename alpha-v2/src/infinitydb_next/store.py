@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS embeddings (
  FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_embeddings_tenant ON embeddings(tenant_id, dimensions);
+CREATE TABLE IF NOT EXISTS embedding_cache (
+ tenant_id TEXT NOT NULL, content_hash TEXT NOT NULL,
+ provider TEXT NOT NULL, model TEXT NOT NULL, model_revision TEXT NOT NULL,
+ config_fingerprint TEXT NOT NULL, dimensions INTEGER NOT NULL,
+ vector_json TEXT NOT NULL, created_at REAL NOT NULL,
+ PRIMARY KEY(tenant_id,content_hash,provider,model,model_revision,config_fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_embedding_cache_tenant
+ ON embedding_cache(tenant_id,provider,model);
 CREATE TABLE IF NOT EXISTS evidence (
  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, memory_id TEXT NOT NULL,
  raw_content TEXT NOT NULL, created_at REAL NOT NULL, sha256 TEXT NOT NULL,
@@ -178,6 +187,64 @@ class MemoryStore:
             raise ValueError("embedding provider must expose non-empty provider and model identity")
         return info.provider, info.model, None
 
+    def _cached_or_embed(
+        self, entries: list[tuple[str, str]], provider: EmbeddingProvider, *,
+        provider_name: str, model_name: str, revision: str | None,
+        config_fingerprint: str,
+    ) -> dict[tuple[str, str], list[float]]:
+        """Resolve (tenant, content) vectors, calling the provider only for cache misses."""
+        revision_key = revision or ""
+        resolved: dict[tuple[str, str], list[float]] = {}
+        missing: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        with self._lock:
+            for tenant, content in entries:
+                digest = hashlib.sha256(content.encode()).hexdigest()
+                key = (tenant, digest)
+                if key in seen:
+                    continue
+                seen.add(key)
+                row = self.db.execute(
+                    """SELECT vector_json FROM embedding_cache
+                       WHERE tenant_id=? AND content_hash=? AND provider=? AND model=?
+                         AND model_revision=? AND config_fingerprint=?""",
+                    (tenant, digest, provider_name, model_name, revision_key, config_fingerprint),
+                ).fetchone()
+                if row is not None:
+                    resolved[key] = self._validated_vector(json.loads(row["vector_json"]))
+                else:
+                    missing.append((tenant, digest, content))
+        if missing:
+            # A single provider call handles all unique cache misses in this request.
+            vectors = provider.embed([content for _, _, content in missing])
+            if len(vectors) != len(missing):
+                raise ValueError("embedding provider must return exactly one vector per cache miss")
+            validated = [self._validated_vector(vector) for vector in vectors]
+            dimensions = {len(vector) for vector in validated}
+            if len(dimensions) > 1:
+                raise ValueError("embedding provider returned inconsistent dimensions")
+            for (tenant, digest, _), vector in zip(missing, validated):
+                resolved[(tenant, digest)] = vector
+        return resolved
+
+    @staticmethod
+    def _cache_rows(
+        entries: list[tuple[str, str]], vectors: dict[tuple[str, str], list[float]], *,
+        provider_name: str, model_name: str, revision: str | None,
+        config_fingerprint: str, now: float,
+    ) -> list[tuple[Any, ...]]:
+        rows: dict[tuple[str, str], tuple[Any, ...]] = {}
+        for tenant, content in entries:
+            digest = hashlib.sha256(content.encode()).hexdigest()
+            key = (tenant, digest)
+            vector = vectors[key]
+            rows[key] = (
+                tenant, digest, provider_name, model_name, revision or "",
+                config_fingerprint, len(vector),
+                json.dumps(vector, separators=(",", ":")), now,
+            )
+        return list(rows.values())
+
     def add_memory_with_embedding(
         self, content: str, provider: EmbeddingProvider, *,
         tenant_id: str = "default", kind: str = "fact",
@@ -185,25 +252,39 @@ class MemoryStore:
         raw_evidence: str | None = None, confidence: float = 1.0,
         valid_from: float | None = None, valid_to: float | None = None,
         memory_id: str | None = None, model_revision: str | None = None,
+        config_fingerprint: str = "default",
     ) -> str:
-        """Embed and persist one memory; provider I/O happens before the DB transaction."""
+        """Embed and persist one memory, reusing a tenant/model-scoped cached vector."""
         if not content or not content.strip():
             raise ValueError("content must not be empty")
-        vectors = provider.embed([content])
-        if len(vectors) != 1:
-            raise ValueError("embedding provider must return exactly one vector")
-        vector = self._validated_vector(vectors[0])
         provider_name, model_name, _ = self._provider_identity(provider)
-        revision = model_revision
-        if revision is not None and not revision.strip():
+        if model_revision is not None and not model_revision.strip():
             raise ValueError("model_revision must be non-empty when provided")
+        if not config_fingerprint.strip():
+            raise ValueError("config_fingerprint must be non-empty")
         if not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError("confidence must be between 0 and 1")
+        entries = [(tenant_id, content)]
+        vectors = self._cached_or_embed(
+            entries, provider, provider_name=provider_name, model_name=model_name,
+            revision=model_revision, config_fingerprint=config_fingerprint,
+        )
+        vector = vectors[(tenant_id, hashlib.sha256(content.encode()).hexdigest())]
         now = time.time()
         mid = memory_id or str(uuid.uuid4())
         starts = now if valid_from is None else valid_from
         digest = hashlib.sha256(content.encode()).hexdigest()
+        cache_rows = self._cache_rows(
+            entries, vectors, provider_name=provider_name, model_name=model_name,
+            revision=model_revision, config_fingerprint=config_fingerprint, now=now,
+        )
         with self._lock, self.db:
+            self.db.executemany(
+                """INSERT OR IGNORE INTO embedding_cache
+                   (tenant_id,content_hash,provider,model,model_revision,
+                    config_fingerprint,dimensions,vector_json,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""", cache_rows,
+            )
             self.db.execute(
                 "INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (mid, tenant_id, kind, content, now, starts, valid_to,
@@ -217,7 +298,7 @@ class MemoryStore:
                        memory_id,tenant_id,dimensions,vector_json,provider,model,model_revision
                    ) VALUES(?,?,?,?,?,?,?)""",
                 (mid, tenant_id, len(vector), json.dumps(vector, separators=(",", ":")),
-                 provider_name, model_name, revision),
+                 provider_name, model_name, model_revision),
             )
             if raw_evidence is not None:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
@@ -225,39 +306,40 @@ class MemoryStore:
 
     def add_memories_with_embeddings(
         self, items: Iterable[dict[str, Any]], provider: EmbeddingProvider, *,
-        model_revision: str | None = None,
+        model_revision: str | None = None, config_fingerprint: str = "default",
     ) -> list[str]:
-        """Batch-embed first, then atomically persist all memories and vectors."""
+        """Batch-ingest memories, embedding only unique tenant-scoped cache misses."""
         batch = list(items)
         if not batch:
             return []
         contents = [str(item.get("content", "")) for item in batch]
         if any(not content.strip() for content in contents):
             raise ValueError("content must not be empty")
-        vectors = provider.embed(contents)
-        if len(vectors) != len(batch):
-            raise ValueError("embedding provider must return exactly one vector per memory")
-        validated = [self._validated_vector(vector) for vector in vectors]
-        if len({len(vector) for vector in validated}) != 1:
-            raise ValueError("embedding provider returned inconsistent dimensions")
         provider_name, model_name, _ = self._provider_identity(provider)
-        revision = model_revision
-        if revision is not None and not revision.strip():
+        if model_revision is not None and not model_revision.strip():
             raise ValueError("model_revision must be non-empty when provided")
+        if not config_fingerprint.strip():
+            raise ValueError("config_fingerprint must be non-empty")
+        tenants = [str(item.get("tenant_id", "default")) for item in batch]
+        entries = list(zip(tenants, contents))
+        vectors = self._cached_or_embed(
+            entries, provider, provider_name=provider_name, model_name=model_name,
+            revision=model_revision, config_fingerprint=config_fingerprint,
+        )
         now = time.time()
         memory_rows: list[tuple[Any, ...]] = []
         embedding_rows: list[tuple[Any, ...]] = []
         fts_rows: list[tuple[str, str, str]] = []
         ids: list[str] = []
-        for item, content, vector in zip(batch, contents, validated):
+        for item, tenant, content in zip(batch, tenants, contents):
             confidence = float(item.get("confidence", 1.0))
             if not math.isfinite(confidence) or not 0 <= confidence <= 1:
                 raise ValueError("confidence must be between 0 and 1")
-            tenant = str(item.get("tenant_id", "default"))
             mid = str(item.get("memory_id") or uuid.uuid4())
             created = float(item.get("created_at") or now)
             starts = float(item.get("valid_from") or created)
             digest = hashlib.sha256(content.encode()).hexdigest()
+            vector = vectors[(tenant, digest)]
             memory_rows.append((
                 mid, tenant, str(item.get("kind", "fact")), content, created,
                 starts, item.get("valid_to"),
@@ -266,11 +348,21 @@ class MemoryStore:
             ))
             embedding_rows.append((
                 mid, tenant, len(vector), json.dumps(vector, separators=(",", ":")),
-                provider_name, model_name, revision,
+                provider_name, model_name, model_revision,
             ))
             fts_rows.append((mid, self._tenant_key(tenant), content))
             ids.append(mid)
+        cache_rows = self._cache_rows(
+            entries, vectors, provider_name=provider_name, model_name=model_name,
+            revision=model_revision, config_fingerprint=config_fingerprint, now=now,
+        )
         with self._lock, self.db:
+            self.db.executemany(
+                """INSERT OR IGNORE INTO embedding_cache
+                   (tenant_id,content_hash,provider,model,model_revision,
+                    config_fingerprint,dimensions,vector_json,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""", cache_rows,
+            )
             self.db.executemany("INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)", memory_rows)
             self.db.executemany(
                 """INSERT INTO embeddings(
