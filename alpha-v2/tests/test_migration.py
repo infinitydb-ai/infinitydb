@@ -147,3 +147,46 @@ def test_dual_write_provider_failure_persists_nothing(tmp_path):
         assert manager.status(migration)["completed"] == 0
     finally:
         store.close()
+
+
+def test_batch_dual_write_is_atomic_and_advances_progress(tmp_path):
+    store = MemoryStore(tmp_path / "dual-batch.sqlite")
+    try:
+        provider = FakeProvider()
+        manager = EmbeddingMigrationManager(store)
+        migration = manager.begin(
+            provider, tenant_id="batch-tenant", model_revision="r2",
+            config_fingerprint="target-config",
+        )
+        ids = manager.add_memories_with_dual_embeddings(
+            migration,
+            [{"content": "batch one"}, {"content": "batch two", "raw_evidence": "source"}],
+            ActiveProvider(), provider, tenant_id="batch-tenant",
+            migration_model_revision="r2",
+            migration_config_fingerprint="target-config",
+        )
+        assert len(ids) == 2
+        assert manager.status(migration)["total"] == 2
+        assert manager.status(migration)["completed"] == 2
+        assert store.stats(tenant_id="batch-tenant")["memories"] == 2
+        assert manager.activate(migration)["status"] == "active"
+    finally:
+        store.close()
+
+
+def test_batch_dual_write_validation_failure_writes_nothing(tmp_path):
+    store = MemoryStore(tmp_path / "dual-batch-failure.sqlite")
+    try:
+        provider = FakeProvider()
+        manager = EmbeddingMigrationManager(store)
+        migration = manager.begin(provider, tenant_id="batch-tenant")
+        with pytest.raises(ValueError, match="confidence"):
+            manager.add_memories_with_dual_embeddings(
+                migration,
+                [{"content": "valid"}, {"content": "invalid", "confidence": 4}],
+                ActiveProvider(), provider, tenant_id="batch-tenant",
+            )
+        assert store.stats(tenant_id="batch-tenant")["memories"] == 0
+        assert manager.status(migration)["total"] == 0
+    finally:
+        store.close()
