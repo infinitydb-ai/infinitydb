@@ -4,7 +4,9 @@ import hashlib
 import heapq
 import json
 import math
+import os
 import sqlite3
+import tempfile
 import threading
 import time
 import uuid
@@ -63,8 +65,13 @@ CREATE TABLE IF NOT EXISTS edges (
 class MemoryStore:
     """Deterministic SQLite alpha store; no model or external API calls are made."""
 
-    def __init__(self, path: str | Path = "infinitydb-next.sqlite3") -> None:
+    def __init__(
+        self, path: str | Path = "infinitydb-next.sqlite3", *,
+        ann_index_dir: str | Path | None = None,
+    ) -> None:
         self.path = str(path)
+        # Persistence is opt-in: callers choose where derived native index files live.
+        self.ann_index_dir = Path(ann_index_dir) if ann_index_dir is not None else None
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self._lock = threading.RLock()
         self._ann_cache: dict[tuple[str, int, str, str, str | None], tuple[Any, list[str]]] = {}
@@ -107,6 +114,99 @@ class MemoryStore:
                 key: cached for key, cached in self._ann_cache.items()
                 if key[0] not in affected
             }
+
+
+    def _ann_partition_paths(
+        self, key: tuple[str, int, str, str, str | None]
+    ) -> tuple[Path, Path]:
+        if self.ann_index_dir is None:
+            raise RuntimeError("persistent ANN storage is not enabled")
+        identity = json.dumps(key, separators=(",", ":"), ensure_ascii=False)
+        partition = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return (
+            self.ann_index_dir / f"{partition}.hnsw",
+            self.ann_index_dir / f"{partition}.json",
+        )
+
+    @staticmethod
+    def _ann_source_fingerprint(rows: list[sqlite3.Row]) -> str:
+        digest = hashlib.sha256()
+        for row in rows:
+            digest.update(row["memory_id"].encode("utf-8"))
+            digest.update(bytes([0]))
+            digest.update(row["vector_json"].encode("utf-8"))
+            digest.update(bytes([10]))
+        return digest.hexdigest()
+
+    def _load_persisted_ann(
+        self, hnswlib: Any, key: tuple[str, int, str, str, str | None],
+        fingerprint: str, expected_labels: list[str],
+    ) -> tuple[Any, list[str]] | None:
+        if self.ann_index_dir is None:
+            return None
+        index_path, manifest_path = self._ann_partition_paths(key)
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if (
+                manifest.get("format_version") != 1
+                or manifest.get("dimensions") != key[1]
+                or manifest.get("source_fingerprint") != fingerprint
+                or manifest.get("labels") != expected_labels
+                or not index_path.is_file()
+            ):
+                return None
+            checksum = hashlib.sha256(index_path.read_bytes()).hexdigest()
+            if checksum != manifest.get("index_sha256"):
+                return None
+            index = hnswlib.Index(space="cosine", dim=key[1])
+            index.load_index(str(index_path), max_elements=len(expected_labels))
+            return index, expected_labels
+        except (OSError, ValueError, RuntimeError, json.JSONDecodeError, TypeError):
+            return None
+
+    def _save_persisted_ann(
+        self, index: Any, key: tuple[str, int, str, str, str | None],
+        fingerprint: str, labels: list[str],
+    ) -> None:
+        if self.ann_index_dir is None:
+            return
+        self.ann_index_dir.mkdir(parents=True, exist_ok=True)
+        index_path, manifest_path = self._ann_partition_paths(key)
+        index_fd, index_temp_name = tempfile.mkstemp(
+            prefix=".ann-index-", suffix=".tmp", dir=self.ann_index_dir
+        )
+        os.close(index_fd)
+        manifest_fd, manifest_temp_name = tempfile.mkstemp(
+            prefix=".ann-manifest-", suffix=".tmp", dir=self.ann_index_dir
+        )
+        try:
+            index.save_index(index_temp_name)
+            index_checksum = hashlib.sha256(Path(index_temp_name).read_bytes()).hexdigest()
+            manifest = {
+                "format_version": 1,
+                "dimensions": key[1],
+                "source_fingerprint": fingerprint,
+                "labels": labels,
+                "index_sha256": index_checksum,
+            }
+            with os.fdopen(manifest_fd, "w", encoding="utf-8") as stream:
+                json.dump(manifest, stream, separators=(",", ":"), ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(index_temp_name, index_path)
+            os.replace(manifest_temp_name, manifest_path)
+        except Exception:
+            try:
+                os.close(manifest_fd)
+            except OSError:
+                pass
+            raise
+        finally:
+            for temporary in (index_temp_name, manifest_temp_name):
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
 
     def _init_fts(self) -> bool:
         try:
@@ -609,12 +709,13 @@ class MemoryStore:
         ef_search: int = 64,
         candidate_multiplier: int = 8,
     ) -> list[SearchHit]:
-        """Search a tenant/model-partitioned in-memory HNSW index.
+        """Search a tenant/model-partitioned HNSW index.
 
         Install the optional ANN extra with pip install infinitydb-next[ann].
         HNSW supplies candidates; SQLite applies current temporal/kind filters
-        and exact cosine rescoring. Indexes rebuild lazily from canonical SQLite
-        embeddings and are invalidated whenever that tenant's embeddings change.
+        and exact cosine rescoring. Set ann_index_dir on the store to persist
+        recoverable index files; source fingerprints detect stale files after
+        database mutations.
         """
         if limit < 1:
             return []
@@ -654,12 +755,18 @@ class MemoryStore:
                 if not source_rows:
                     return []
                 labels = [row["memory_id"] for row in source_rows]
-                vectors = [json.loads(row["vector_json"]) for row in source_rows]
-                index = hnswlib.Index(space="cosine", dim=len(query))
-                index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
-                index.add_items(vectors, list(range(len(vectors))), num_threads=1)
-                index.set_ef(max(ef_search, min(len(vectors), 64)))
-                cached = (index, labels)
+                fingerprint = self._ann_source_fingerprint(source_rows)
+                cached = self._load_persisted_ann(hnswlib, key, fingerprint, labels)
+                if cached is None:
+                    vectors = [json.loads(row["vector_json"]) for row in source_rows]
+                    index = hnswlib.Index(space="cosine", dim=len(query))
+                    index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
+                    index.add_items(vectors, list(range(len(vectors))), num_threads=1)
+                    cached = (index, labels)
+                    # SQLite is authoritative; native indexes are recoverable derivatives.
+                    self._save_persisted_ann(index, key, fingerprint, labels)
+                index, labels = cached
+                index.set_ef(max(ef_search, min(len(labels), 64)))
                 self._ann_cache[key] = cached
 
             index, labels = cached

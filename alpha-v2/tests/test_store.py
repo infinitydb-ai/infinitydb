@@ -571,6 +571,8 @@ def test_vector_top_k_respects_model_revision_and_tenant_filters(store):
     assert [hit.memory.id for hit in hits] == [second]
 
 class FakeHNSWIndex:
+    load_calls = 0
+
     def __init__(self, space, dim):
         assert space == "cosine"
         self.dim = dim
@@ -585,6 +587,20 @@ class FakeHNSWIndex:
 
     def set_ef(self, ef):
         self.ef = ef
+
+    def save_index(self, path):
+        import json
+
+        Path(path).write_text(json.dumps(self.vectors), encoding="utf-8")
+
+    def load_index(self, path, max_elements=None):
+        import json
+
+        type(self).load_calls += 1
+        self.vectors = {
+            int(label): vector
+            for label, vector in json.loads(Path(path).read_text(encoding="utf-8")).items()
+        }
 
     def knn_query(self, queries, k, num_threads=1):
         import math
@@ -703,3 +719,91 @@ def test_ann_cache_invalidated_by_provider_backed_single_and_batch_ingestion(sto
     )
     assert ids[0] in [hit.memory.id for hit in after_batch]
 
+
+
+
+def test_persistent_ann_index_loads_after_store_reopen(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    FakeHNSWIndex.load_calls = 0;
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "persistent.sqlite"
+        index_dir = Path(directory) / "ann"
+        first = MemoryStore(database, ann_index_dir=index_dir)
+        memory_id = first.add_memory("persistent ANN memory", tenant_id="persistent")
+        first.set_embedding(
+            memory_id, [1.0, 0.0], tenant_id="persistent", provider="p", model="m"
+        )
+        first.search_vector_ann(
+            [1.0, 0.0], tenant_id="persistent", provider="p", model="m"
+        )
+        assert list(index_dir.glob("*.hnsw"))
+        assert list(index_dir.glob("*.json"))
+        first.close()
+
+        second = MemoryStore(database, ann_index_dir=index_dir)
+        hits = second.search_vector_ann(
+            [1.0, 0.0], tenant_id="persistent", provider="p", model="m"
+        )
+        assert [hit.memory.id for hit in hits] == [memory_id]
+        assert FakeHNSWIndex.load_calls == 1
+        second.close()
+
+
+def test_persistent_ann_rebuilds_when_sqlite_embeddings_change(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "stale.sqlite"
+        index_dir = Path(directory) / "ann"
+        first = MemoryStore(database, ann_index_dir=index_dir)
+        memory_id = first.add_memory("stale ANN memory", tenant_id="stale")
+        first.set_embedding(
+            memory_id, [0.0, 1.0], tenant_id="stale", provider="p", model="m"
+        )
+        first.search_vector_ann(
+            [1.0, 0.0], tenant_id="stale", provider="p", model="m"
+        )
+        first.close()
+
+        second = MemoryStore(database, ann_index_dir=index_dir)
+        second.set_embedding(
+            memory_id, [1.0, 0.0], tenant_id="stale", provider="p", model="m"
+        )
+        hits = second.search_vector_ann(
+            [1.0, 0.0], tenant_id="stale", provider="p", model="m"
+        )
+        assert hits[0].score == pytest.approx(1.0)
+        second.close()
+
+
+def test_persistent_ann_rebuilds_corrupt_index_file(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "corrupt.sqlite"
+        index_dir = Path(directory) / "ann"
+        first = MemoryStore(database, ann_index_dir=index_dir)
+        memory_id = first.add_memory("corrupt ANN memory", tenant_id="corrupt")
+        first.set_embedding(
+            memory_id, [1.0, 0.0], tenant_id="corrupt", provider="p", model="m"
+        )
+        first.search_vector_ann(
+            [1.0, 0.0], tenant_id="corrupt", provider="p", model="m"
+        )
+        first.close()
+        index_file = next(index_dir.glob("*.hnsw"))
+        index_file.write_text("corrupted", encoding="utf-8")
+
+        second = MemoryStore(database, ann_index_dir=index_dir)
+        hits = second.search_vector_ann(
+            [1.0, 0.0], tenant_id="corrupt", provider="p", model="m"
+        )
+        assert [hit.memory.id for hit in hits] == [memory_id]
+        second.close()
