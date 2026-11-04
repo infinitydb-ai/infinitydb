@@ -535,3 +535,38 @@ def test_graph_traversal_validates_hops_and_empty_seeds(store):
         store.traverse_graph(["missing"], max_hops=-1)
     assert store.traverse_graph([], max_hops=2) == []
     assert store.traverse_graph(["missing"], max_hops=2) == []
+
+
+def test_vector_top_k_is_exact_and_deterministic_for_ties(store):
+    ids = store.add_memories([
+        {"content": "vector candidate c", "tenant_id": "top-k", "memory_id": "c", "created_at": 10.0, "valid_from": 1.0},
+        {"content": "vector candidate b", "tenant_id": "top-k", "memory_id": "b", "created_at": 10.0, "valid_from": 1.0},
+        {"content": "vector candidate a", "tenant_id": "top-k", "memory_id": "a", "created_at": 10.0, "valid_from": 1.0},
+    ])
+    for memory_id in ids:
+        store.set_embedding(memory_id, [1.0, 0.0], tenant_id="top-k", provider="fake", model="ranker")
+
+    hits = store.search_vector(
+        [1.0, 0.0], tenant_id="top-k", limit=2, provider="fake", model="ranker"
+    )
+    assert [hit.memory.id for hit in hits] == ["a", "b"]
+    assert [hit.score for hit in hits] == [1.0, 1.0]
+
+
+def test_vector_top_k_respects_model_revision_and_tenant_filters(store):
+    first = store.add_memory("revision one vector", tenant_id="revision", valid_from=1.0)
+    second = store.add_memory("revision two vector", tenant_id="revision", valid_from=1.0)
+    foreign = store.add_memory("foreign tenant vector", tenant_id="other", valid_from=1.0)
+    store.set_embedding(first, [1.0, 0.0], tenant_id="revision",
+                        provider="fake", model="ranker", model_revision="r1")
+    store.set_embedding(second, [0.9, 0.1], tenant_id="revision",
+                        provider="fake", model="ranker", model_revision="r2")
+    store.set_embedding(foreign, [1.0, 0.0], tenant_id="other",
+                        provider="fake", model="ranker", model_revision="r1")
+
+    hits = store.search_vector(
+        [1.0, 0.0], tenant_id="revision", provider="fake", model="ranker",
+        model_revision="r2", limit=10,
+    )
+    assert [hit.memory.id for hit in hits] == [second]
+
