@@ -911,3 +911,101 @@ def test_incrementally_persisted_ann_keeps_label_mapping_after_restart(monkeypat
         assert {first_id, second_id}.issubset({hit.memory.id for hit in hits})
         assert FakeHNSWIndex.load_calls == 1
         second_store.close()
+
+
+
+def test_delete_embedding_is_tenant_scoped_and_preserves_memory_and_evidence(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    with tempfile.TemporaryDirectory() as directory:
+        store = MemoryStore(Path(directory) / "delete-vector.sqlite")
+        memory_id = store.add_memory(
+            "keep the source memory", tenant_id="delete-tenant",
+            raw_evidence="source record",
+        )
+        store.set_embedding(
+            memory_id, [1.0, 0.0], tenant_id="delete-tenant", provider="p", model="m"
+        )
+        store.search_vector_ann(
+            [1.0, 0.0], tenant_id="delete-tenant", provider="p", model="m"
+        )
+
+        assert store.delete_embedding(memory_id, tenant_id="other-tenant") is False
+        assert store.delete_embedding(memory_id, tenant_id="delete-tenant") is True
+        assert store.delete_embedding(memory_id, tenant_id="delete-tenant") is False
+        assert store.get(memory_id, tenant_id="delete-tenant") is not None
+        assert len(store.evidence_for(memory_id, tenant_id="delete-tenant")) == 1
+        assert store.search_vector(
+            [1.0, 0.0], tenant_id="delete-tenant", provider="p", model="m"
+        ) == []
+        assert store.search_vector_ann(
+            [1.0, 0.0], tenant_id="delete-tenant", provider="p", model="m"
+        ) == []
+        store.close()
+
+
+def test_ann_compaction_rebuilds_partition_and_persists_only_live_vectors(monkeypatch):
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    FakeHNSWIndex.init_calls = 0
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "compact.sqlite"
+        index_dir = Path(directory) / "ann"
+        store = MemoryStore(database, ann_index_dir=index_dir)
+        first = store.add_memory("first vector", tenant_id="compact")
+        second = store.add_memory("second vector", tenant_id="compact")
+        store.set_embedding(first, [1.0, 0.0], tenant_id="compact", provider="p", model="m")
+        store.set_embedding(second, [0.0, 1.0], tenant_id="compact", provider="p", model="m")
+        store.search_vector_ann(
+            [1.0, 0.0], tenant_id="compact", provider="p", model="m"
+        )
+        assert store.delete_embedding(first, tenant_id="compact") is True
+
+        result = store.compact_ann_index(
+            tenant_id="compact", dimensions=2, provider="p", model="m"
+        )
+        assert result == {"vectors": 1, "removed": False}
+        assert FakeHNSWIndex.init_calls == 2
+        assert store._ann_cache[("compact", 2, "p", "m", None)][1] == [second]
+        manifest_path = next(index_dir.glob("*.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert manifest["labels"] == [second]
+
+        hits = store.search_vector_ann(
+            [0.0, 1.0], tenant_id="compact", provider="p", model="m"
+        )
+        assert [hit.memory.id for hit in hits] == [second]
+        store.close()
+
+
+def test_ann_compaction_removes_empty_persistent_partition(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    with tempfile.TemporaryDirectory() as directory:
+        store = MemoryStore(
+            Path(directory) / "empty-compact.sqlite",
+            ann_index_dir=Path(directory) / "ann",
+        )
+        memory_id = store.add_memory("only vector", tenant_id="empty-compact")
+        store.set_embedding(
+            memory_id, [1.0, 0.0], tenant_id="empty-compact", provider="p", model="m"
+        )
+        store.search_vector_ann(
+            [1.0, 0.0], tenant_id="empty-compact", provider="p", model="m"
+        )
+        assert list((Path(directory) / "ann").glob("*.hnsw"))
+        store.delete_embedding(memory_id, tenant_id="empty-compact")
+        result = store.compact_ann_index(
+            tenant_id="empty-compact", dimensions=2, provider="p", model="m"
+        )
+        assert result == {"vectors": 0, "removed": True}
+        assert list((Path(directory) / "ann").glob("*.hnsw")) == []
+        assert list((Path(directory) / "ann").glob("*.json")) == []
+        store.close()
