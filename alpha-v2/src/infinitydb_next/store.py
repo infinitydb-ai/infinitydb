@@ -166,7 +166,6 @@ class MemoryStore:
                                 (mid, self._tenant_key(tenant_id), content))
             if raw_evidence is not None:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
-            self._invalidate_ann([tenant_id])
         return mid
 
     def supersede_memory(
@@ -373,6 +372,7 @@ class MemoryStore:
             )
             if raw_evidence is not None:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
+            self._invalidate_ann([tenant_id])
         return mid
 
     def add_memories_with_embeddings(
