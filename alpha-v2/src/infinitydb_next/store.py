@@ -742,6 +742,76 @@ class MemoryStore:
             )
             self._invalidate_ann([tenant_id])
 
+    def delete_embedding(self, memory_id: str, *, tenant_id: str = "default") -> bool:
+        """Remove one tenant-owned vector while preserving its memory and evidence.
+
+        The content-addressed embedding cache is intentionally retained so a
+        later re-embedding can reuse the provider result. Persistent HNSW files
+        are derived data: the local cache is invalidated and their source
+        fingerprint forces a rebuild on the next ANN search.
+        """
+        if not memory_id or not tenant_id:
+            raise ValueError("memory_id and tenant_id are required")
+        with self._lock, self.db:
+            cursor = self.db.execute(
+                "DELETE FROM embeddings WHERE memory_id=? AND tenant_id=?",
+                (memory_id, tenant_id),
+            )
+            deleted = cursor.rowcount > 0
+            if deleted:
+                self._invalidate_ann([tenant_id])
+        return deleted
+
+    def compact_ann_index(
+        self, *, tenant_id: str, dimensions: int, provider: str, model: str,
+        model_revision: str | None = None,
+    ) -> dict[str, Any]:
+        """Rebuild one ANN partition from canonical SQLite embeddings.
+
+        This removes obsolete HNSW slots left behind by embedding deletions or
+        replacements. SQLite remains authoritative; an empty partition removes
+        its derived cache and persistent files.
+        """
+        if not tenant_id or not provider.strip() or not model.strip():
+            raise ValueError("tenant_id, provider and model are required")
+        if dimensions < 1:
+            raise ValueError("dimensions must be positive")
+        if model_revision is not None and not model_revision.strip():
+            raise ValueError("model_revision must be non-empty when provided")
+        try:
+            import hnswlib
+        except ImportError as exc:
+            raise RuntimeError(
+                "HNSW support is optional; install with pip install infinitydb-next[ann]"
+            ) from exc
+
+        key = (tenant_id, dimensions, provider, model, model_revision)
+        with self._lock:
+            rows = self.db.execute(
+                """SELECT memory_id,vector_json FROM embeddings
+                   WHERE tenant_id=? AND dimensions=? AND provider=? AND model=?
+                     AND model_revision IS ?
+                   ORDER BY memory_id""",
+                key,
+            ).fetchall()
+            if not rows:
+                self._ann_cache.pop(key, None)
+                if self.ann_index_dir is not None:
+                    for path in self._ann_partition_paths(key):
+                        path.unlink(missing_ok=True)
+                return {"vectors": 0, "removed": True}
+
+            labels = [row["memory_id"] for row in rows]
+            vectors = [json.loads(row["vector_json"]) for row in rows]
+            index = hnswlib.Index(space="cosine", dim=dimensions)
+            index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
+            index.add_items(vectors, list(range(len(vectors))), num_threads=1)
+            index.set_ef(min(len(vectors), 64))
+            fingerprint = self._ann_source_fingerprint(rows)
+            self._save_persisted_ann(index, key, fingerprint, labels)
+            self._ann_cache[key] = (index, labels)
+            return {"vectors": len(vectors), "removed": False}
+
     def search_vector_ann(
         self,
         query_embedding: Iterable[float],
