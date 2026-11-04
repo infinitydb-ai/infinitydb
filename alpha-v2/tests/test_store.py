@@ -571,6 +571,8 @@ def test_vector_top_k_respects_model_revision_and_tenant_filters(store):
     assert [hit.memory.id for hit in hits] == [second]
 
 class FakeHNSWIndex:
+    load_calls = 0
+
     def __init__(self, space, dim):
         assert space == "cosine"
         self.dim = dim
@@ -594,6 +596,7 @@ class FakeHNSWIndex:
     def load_index(self, path, max_elements=None):
         import json
 
+        type(self).load_calls += 1
         self.vectors = {
             int(label): vector
             for label, vector in json.loads(Path(path).read_text(encoding="utf-8")).items()
@@ -724,6 +727,7 @@ def test_persistent_ann_index_loads_after_store_reopen(monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    FakeHNSWIndex.load_calls = 0;
     with tempfile.TemporaryDirectory() as directory:
         database = Path(directory) / "persistent.sqlite"
         index_dir = Path(directory) / "ann"
@@ -744,6 +748,7 @@ def test_persistent_ann_index_loads_after_store_reopen(monkeypatch):
             [1.0, 0.0], tenant_id="persistent", provider="p", model="m"
         )
         assert [hit.memory.id for hit in hits] == [memory_id]
+        assert FakeHNSWIndex.load_calls == 1
         second.close()
 
 
