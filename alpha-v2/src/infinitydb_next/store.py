@@ -75,6 +75,8 @@ class MemoryStore:
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self._lock = threading.RLock()
         self._ann_cache: dict[tuple[str, int, str, str, str | None], tuple[Any, list[str]]] = {}
+        # PRAGMA data_version changes when another SQLite connection commits.
+        self._ann_data_version = int(self.db.execute("PRAGMA data_version").fetchone()[0])
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.execute("PRAGMA temp_store=MEMORY")
         self.db.row_factory = sqlite3.Row
@@ -106,6 +108,13 @@ class MemoryStore:
     @staticmethod
     def _tenant_key(tenant_id: str) -> str:
         return "tenant_" + hashlib.sha256(tenant_id.encode()).hexdigest()[:24]
+
+    def _sync_external_ann_writes(self) -> None:
+        """Drop process-local ANN snapshots after another SQLite connection commits."""
+        version = int(self.db.execute("PRAGMA data_version").fetchone()[0])
+        if version != self._ann_data_version:
+            self._ann_cache.clear()
+            self._ann_data_version = version
 
     def _invalidate_ann(self, tenant_ids: Iterable[str]) -> None:
         affected = set(tenant_ids)
@@ -787,30 +796,46 @@ class MemoryStore:
 
         key = (tenant_id, dimensions, provider, model, model_revision)
         with self._lock:
-            rows = self.db.execute(
+            self._sync_external_ann_writes()
+            # Compaction and persistent manifest replacement share SQLite's
+            # cross-process writer lock with ingestion and cold index builds.
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self.db.execute(
                 """SELECT memory_id,vector_json FROM embeddings
                    WHERE tenant_id=? AND dimensions=? AND provider=? AND model=?
                      AND model_revision IS ?
                    ORDER BY memory_id""",
                 key,
             ).fetchall()
-            if not rows:
-                self._ann_cache.pop(key, None)
-                if self.ann_index_dir is not None:
-                    for path in self._ann_partition_paths(key):
-                        path.unlink(missing_ok=True)
-                return {"vectors": 0, "removed": True}
+                if not rows:
+                    self._ann_cache.pop(key, None)
+                    if self.ann_index_dir is not None:
+                        for path in self._ann_partition_paths(key):
+                            path.unlink(missing_ok=True)
+                    self.db.commit()
+                    self._ann_data_version = int(
+                        self.db.execute("PRAGMA data_version").fetchone()[0]
+                    )
+                    return {"vectors": 0, "removed": True}
 
-            labels = [row["memory_id"] for row in rows]
-            vectors = [json.loads(row["vector_json"]) for row in rows]
-            index = hnswlib.Index(space="cosine", dim=dimensions)
-            index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
-            index.add_items(vectors, list(range(len(vectors))), num_threads=1)
-            index.set_ef(min(len(vectors), 64))
-            fingerprint = self._ann_source_fingerprint(rows)
-            self._save_persisted_ann(index, key, fingerprint, labels)
-            self._ann_cache[key] = (index, labels)
-            return {"vectors": len(vectors), "removed": False}
+                labels = [row["memory_id"] for row in rows]
+                vectors = [json.loads(row["vector_json"]) for row in rows]
+                index = hnswlib.Index(space="cosine", dim=dimensions)
+                index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
+                index.add_items(vectors, list(range(len(vectors))), num_threads=1)
+                index.set_ef(min(len(vectors), 64))
+                fingerprint = self._ann_source_fingerprint(rows)
+                self._save_persisted_ann(index, key, fingerprint, labels)
+                self._ann_cache[key] = (index, labels)
+                self.db.commit()
+                self._ann_data_version = int(
+                    self.db.execute("PRAGMA data_version").fetchone()[0]
+                )
+                return {"vectors": len(vectors), "removed": False}
+            except Exception:
+                self.db.rollback()
+                raise
 
     def search_vector_ann(
         self,
@@ -860,28 +885,44 @@ class MemoryStore:
         )
 
         with self._lock:
+            self._sync_external_ann_writes()
             cached = self._ann_cache.get(key)
             if cached is None:
-                source_rows = self.db.execute(
-                    """SELECT memory_id,vector_json FROM embeddings
-                       WHERE tenant_id=? AND dimensions=? AND provider=? AND model=?
-                         AND model_revision IS ?
-                       ORDER BY memory_id""",
-                    key,
-                ).fetchall()
-                if not source_rows:
-                    return []
-                labels = [row["memory_id"] for row in source_rows]
-                fingerprint = self._ann_source_fingerprint(source_rows)
-                cached = self._load_persisted_ann(hnswlib, key, fingerprint, labels)
-                if cached is None:
-                    vectors = [json.loads(row["vector_json"]) for row in source_rows]
-                    index = hnswlib.Index(space="cosine", dim=len(query))
-                    index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
-                    index.add_items(vectors, list(range(len(vectors))), num_threads=1)
-                    cached = (index, labels)
-                    # SQLite is authoritative; native indexes are recoverable derivatives.
-                    self._save_persisted_ann(index, key, fingerprint, labels)
+                # Serialize cold builds and manifest replacement across processes
+                # that share this SQLite database and ANN directory.
+                self.db.execute("BEGIN IMMEDIATE")
+                try:
+                    self._sync_external_ann_writes()
+                    source_rows = self.db.execute(
+                        """SELECT memory_id,vector_json FROM embeddings
+                           WHERE tenant_id=? AND dimensions=? AND provider=? AND model=?
+                             AND model_revision IS ?
+                           ORDER BY memory_id""",
+                        key,
+                    ).fetchall()
+                    if not source_rows:
+                        self.db.commit()
+                        self._ann_data_version = int(
+                            self.db.execute("PRAGMA data_version").fetchone()[0]
+                        )
+                        return []
+                    labels = [row["memory_id"] for row in source_rows]
+                    fingerprint = self._ann_source_fingerprint(source_rows)
+                    cached = self._load_persisted_ann(hnswlib, key, fingerprint, labels)
+                    if cached is None:
+                        vectors = [json.loads(row["vector_json"]) for row in source_rows]
+                        index = hnswlib.Index(space="cosine", dim=len(query))
+                        index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
+                        index.add_items(vectors, list(range(len(vectors))), num_threads=1)
+                        cached = (index, labels)
+                        self._save_persisted_ann(index, key, fingerprint, labels)
+                    self.db.commit()
+                    self._ann_data_version = int(
+                        self.db.execute("PRAGMA data_version").fetchone()[0]
+                    )
+                except Exception:
+                    self.db.rollback()
+                    raise
                 index, labels = cached
                 index.set_ef(max(ef_search, min(len(labels), 64)))
                 self._ann_cache[key] = cached

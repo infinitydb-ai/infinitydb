@@ -20,8 +20,7 @@ fingerprint derived from ordered SQLite embedding rows, and an SHA-256 checksum
 of the native index. Index and manifest files are written through temporary
 files and atomic replacement; the manifest is replaced last. On open/search,
 a missing, stale, version-mismatched or checksum-invalid index is rebuilt from
-SQLite, which remains authoritative. This persistence mode is single-process;
-cross-process writer coordination is not yet implemented. `delete_embedding()`
+SQLite, which remains authoritative. Persistent index builds and compaction acquire SQLite `BEGIN IMMEDIATE` writer transactions, serializing manifest replacement with other writers that share the database. Each process checks SQLite `PRAGMA data_version` and invalidates its local ANN cache after another connection commits; this is next-query invalidation, not linearizable distributed search. Processes must share the same SQLite database and ANN directory on a filesystem with SQLite-compatible locking. `delete_embedding()`
 removes a tenant-owned vector while preserving its memory and evidence, then
 invalidates the local ANN cache. `compact_ann_index()` explicitly rebuilds one
 tenant/model/dimension partition from SQLite and removes empty persisted

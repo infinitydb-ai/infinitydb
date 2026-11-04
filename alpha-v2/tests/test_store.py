@@ -1009,3 +1009,64 @@ def test_ann_compaction_removes_empty_persistent_partition(monkeypatch):
         assert list((Path(directory) / "ann").glob("*.hnsw")) == []
         assert list((Path(directory) / "ann").glob("*.json")) == []
         store.close()
+
+
+
+def test_ann_cache_refreshes_after_another_sqlite_connection_commits(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "multi-connection.sqlite"
+        first = MemoryStore(database)
+        second = MemoryStore(database)
+        try:
+            first_id = first.add_memory("first process memory", tenant_id="shared")
+            first.set_embedding(
+                first_id, [0.0, 1.0], tenant_id="shared", provider="p", model="m"
+            )
+            first.search_vector_ann(
+                [1.0, 0.0], tenant_id="shared", provider="p", model="m"
+            )
+            second_id = second.add_memory("second process memory", tenant_id="shared")
+            second.set_embedding(
+                second_id, [1.0, 0.0], tenant_id="shared", provider="p", model="m"
+            )
+
+            hits = first.search_vector_ann(
+                [1.0, 0.0], tenant_id="shared", provider="p", model="m"
+            )
+            assert hits[0].memory.id == second_id
+            assert {first_id, second_id}.issubset({hit.memory.id for hit in hits})
+        finally:
+            first.close()
+            second.close()
+
+
+def test_ann_cold_build_uses_sqlite_write_lock_for_shared_manifest(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "shared-build.sqlite"
+        index_dir = Path(directory) / "ann"
+        first = MemoryStore(database, ann_index_dir=index_dir)
+        second = MemoryStore(database, ann_index_dir=index_dir)
+        try:
+            memory_id = first.add_memory("shared persistent vector", tenant_id="shared-build")
+            first.set_embedding(
+                memory_id, [1.0, 0.0], tenant_id="shared-build", provider="p", model="m"
+            )
+            first_hits = first.search_vector_ann(
+                [1.0, 0.0], tenant_id="shared-build", provider="p", model="m"
+            )
+            second_hits = second.search_vector_ann(
+                [1.0, 0.0], tenant_id="shared-build", provider="p", model="m"
+            )
+            assert [hit.memory.id for hit in first_hits] == [memory_id]
+            assert [hit.memory.id for hit in second_hits] == [memory_id]
+        finally:
+            first.close()
+            second.close()
