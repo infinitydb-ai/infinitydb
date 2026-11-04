@@ -83,3 +83,14 @@ complete before interpreting recall results.
   product ranking. Add LongMemEval, LoCoMo, temporal/conflict reasoning,
   multi-hop recall, deletion, crash recovery and adversarial tenant-isolation
   suites before making memory-quality or security claims.
+
+
+## Upstream API references
+
+- Mem0 OSS add/search: https://github.com/mem0ai/mem0/blob/main/docs/core-concepts/memory-operations/add.mdx and https://github.com/mem0ai/mem0/blob/main/docs/core-concepts/memory-operations/search.mdx
+- Zep v4 user graph, episode ingestion and asynchronous task processing: https://help.getzep.com/v4/quick-start-guide and https://help.getzep.com/v4/adding-batch-data
+- Letta archival passage create/search: https://docs.letta.com/api/python/resources/agents/subresources/passages
+
+The adapters target these documented public interfaces. SDK behavior can change;
+pin the installed dependency versions and rerun the smoke tests before publishing
+a result.
