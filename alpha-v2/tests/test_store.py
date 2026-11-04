@@ -570,3 +570,102 @@ def test_vector_top_k_respects_model_revision_and_tenant_filters(store):
     )
     assert [hit.memory.id for hit in hits] == [second]
 
+class FakeHNSWIndex:
+    def __init__(self, space, dim):
+        assert space == "cosine"
+        self.dim = dim
+        self.vectors = {}
+
+    def init_index(self, max_elements, ef_construction, M):
+        self.max_elements = max_elements
+
+    def add_items(self, vectors, labels, num_threads=1):
+        for vector, label in zip(vectors, labels):
+            self.vectors[int(label)] = list(vector)
+
+    def set_ef(self, ef):
+        self.ef = ef
+
+    def knn_query(self, queries, k, num_threads=1):
+        import math
+
+        query = list(queries[0])
+        qnorm = math.sqrt(sum(value * value for value in query))
+        ranked = []
+        for label, vector in self.vectors.items():
+            norm = math.sqrt(sum(value * value for value in vector))
+            cosine = sum(a * b for a, b in zip(query, vector)) / (qnorm * norm)
+            ranked.append((1.0 - cosine, label))
+        ranked.sort()
+        selected = [label for _, label in ranked[:k]]
+        return [selected], [[distance for distance, _ in ranked[:k]]]
+
+
+def test_ann_search_isolated_by_tenant_and_embedding_model(store, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    a_best = store.add_memory("tenant a nearest", tenant_id="ann-a")
+    a_other = store.add_memory("tenant a other model", tenant_id="ann-a")
+    b_best = store.add_memory("tenant b nearest", tenant_id="ann-b")
+    store.set_embedding(a_best, [1.0, 0.0], tenant_id="ann-a", provider="p", model="m")
+    store.set_embedding(a_other, [0.0, 1.0], tenant_id="ann-a", provider="p", model="other")
+    store.set_embedding(b_best, [1.0, 0.0], tenant_id="ann-b", provider="p", model="m")
+
+    hits_a = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-a", provider="p", model="m", limit=5
+    )
+    hits_b = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-b", provider="p", model="m", limit=5
+    )
+    assert [hit.memory.id for hit in hits_a] == [a_best]
+    assert [hit.memory.id for hit in hits_b] == [b_best]
+    assert hits_a[0].matched_by == ["ann_vector"]
+
+
+def test_ann_index_is_invalidated_when_embedding_changes(store, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    memory_id = store.add_memory("mutable vector", tenant_id="ann-refresh")
+    store.set_embedding(
+        memory_id, [0.0, 1.0], tenant_id="ann-refresh", provider="p", model="m"
+    )
+    first = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-refresh", provider="p", model="m"
+    )
+    assert first[0].score == pytest.approx(0.0)
+
+    store.set_embedding(
+        memory_id, [1.0, 0.0], tenant_id="ann-refresh", provider="p", model="m"
+    )
+    second = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-refresh", provider="p", model="m"
+    )
+    assert second[0].score == pytest.approx(1.0)
+
+
+def test_ann_search_applies_current_temporal_and_kind_filters(store, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    old = store.add_memory(
+        "old fact", tenant_id="ann-filters", kind="fact",
+        valid_from=1.0, valid_to=5.0,
+    )
+    current = store.add_memory(
+        "current episode", tenant_id="ann-filters", kind="episode",
+        valid_from=5.0,
+    )
+    store.set_embedding(old, [1.0, 0.0], tenant_id="ann-filters", provider="p", model="m")
+    store.set_embedding(current, [0.9, 0.1], tenant_id="ann-filters", provider="p", model="m")
+
+    hits = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-filters", provider="p", model="m",
+        kinds=["episode"], as_of=10.0, limit=5,
+    )
+    assert [hit.memory.id for hit in hits] == [current]
+
