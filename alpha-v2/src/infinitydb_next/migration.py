@@ -352,6 +352,132 @@ class EmbeddingMigrationManager:
             self.store._refresh_ann_after_insert([tenant_id])
         return mid
 
+
+    def add_memories_with_dual_embeddings(
+        self,
+        migration_id: str,
+        items: list[dict[str, Any]],
+        active_provider: EmbeddingProvider,
+        migration_provider: EmbeddingProvider,
+        *,
+        tenant_id: str,
+        active_model_revision: str | None = None,
+        active_config_fingerprint: str = "default",
+        migration_model_revision: str | None = None,
+        migration_config_fingerprint: str = "default",
+    ) -> list[str]:
+        """Atomically batch-ingest memories into active and preparing model spaces."""
+        if not items:
+            return []
+        if not tenant_id:
+            raise ValueError("tenant_id must not be empty")
+        if not active_config_fingerprint.strip() or not migration_config_fingerprint.strip():
+            raise ValueError("config fingerprints must be non-empty")
+        if active_model_revision is not None and not active_model_revision.strip():
+            raise ValueError("active_model_revision must be non-empty")
+        if migration_model_revision is not None and not migration_model_revision.strip():
+            raise ValueError("migration_model_revision must be non-empty")
+        contents = [str(item.get("content", "")) for item in items]
+        if any(not content.strip() for content in contents):
+            raise ValueError("content must not be empty")
+        active_name, active_model, _ = self.store._provider_identity(active_provider)
+        target_name, target_model, _ = self.store._provider_identity(migration_provider)
+        with self.store._lock:
+            migration = self._get(migration_id)
+            if migration["tenant_id"] != tenant_id or migration["status"] != "preparing":
+                raise ValueError("migration must be preparing for the specified tenant")
+            if (migration["provider"], migration["model"]) != (target_name, target_model):
+                raise ValueError("migration provider identity does not match target")
+            if migration["model_revision"] != migration_model_revision:
+                raise ValueError("migration model revision does not match target")
+            if migration["config_fingerprint"] != migration_config_fingerprint:
+                raise ValueError("migration config fingerprint does not match target")
+
+        entries = [(tenant_id, content) for content in contents]
+        active_vectors = self.store._cached_or_embed(
+            entries, active_provider, provider_name=active_name, model_name=active_model,
+            revision=active_model_revision, config_fingerprint=active_config_fingerprint,
+        )
+        target_vectors = self.store._cached_or_embed(
+            entries, migration_provider, provider_name=target_name, model_name=target_model,
+            revision=migration_model_revision, config_fingerprint=migration_config_fingerprint,
+        )
+        now = time.time()
+        ids: list[str] = []
+        memory_rows: list[tuple[Any, ...]] = []
+        active_rows: list[tuple[Any, ...]] = []
+        staged_rows: list[tuple[Any, ...]] = []
+        fts_rows: list[tuple[str, str, str]] = []
+        for item, content in zip(items, contents):
+            confidence = float(item.get("confidence", 1.0))
+            if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                raise ValueError("confidence must be between 0 and 1")
+            mid = str(item.get("memory_id") or uuid.uuid4())
+            digest = __import__("hashlib").sha256(content.encode()).hexdigest()
+            active_vector = active_vectors[(tenant_id, digest)]
+            target_vector = target_vectors[(tenant_id, digest)]
+            created = float(item.get("created_at") or now)
+            starts = float(item.get("valid_from") or created)
+            memory_rows.append((
+                mid, tenant_id, str(item.get("kind", "fact")), content, created,
+                starts, item.get("valid_to"),
+                json.dumps(item.get("metadata") or {}, sort_keys=True),
+                item.get("source_id"), confidence, digest,
+            ))
+            active_rows.append((
+                mid, tenant_id, len(active_vector), json.dumps(active_vector, separators=(",", ":")),
+                active_name, active_model, active_model_revision,
+            ))
+            staged_rows.append((
+                migration_id, mid, len(target_vector),
+                json.dumps(target_vector, separators=(",", ":")),
+            ))
+            fts_rows.append((mid, self.store._tenant_key(tenant_id), content))
+            ids.append(mid)
+
+        active_cache = self.store._cache_rows(
+            entries, active_vectors, provider_name=active_name, model_name=active_model,
+            revision=active_model_revision, config_fingerprint=active_config_fingerprint, now=now,
+        )
+        target_cache = self.store._cache_rows(
+            entries, target_vectors, provider_name=target_name, model_name=target_model,
+            revision=migration_model_revision, config_fingerprint=migration_config_fingerprint, now=now,
+        )
+        with self.store._lock, self.store.db:
+            current = self._get(migration_id)
+            if current["status"] != "preparing":
+                raise ValueError("migration state changed during dual embedding")
+            self.store.db.executemany(
+                """INSERT OR IGNORE INTO embedding_cache
+                   (tenant_id,content_hash,provider,model,model_revision,
+                    config_fingerprint,dimensions,vector_json,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                active_cache + target_cache,
+            )
+            self.store.db.executemany("INSERT INTO memories VALUES(?,?,?,?,?,?,?,?,?,?,?)", memory_rows)
+            self.store.db.executemany(
+                """INSERT INTO embeddings
+                   (memory_id,tenant_id,dimensions,vector_json,provider,model,model_revision)
+                   VALUES(?,?,?,?,?,?,?)""", active_rows,
+            )
+            self.store.db.executemany(
+                """INSERT INTO embedding_migration_vectors
+                   (migration_id,memory_id,dimensions,vector_json) VALUES(?,?,?,?)""",
+                staged_rows,
+            )
+            if self.store._fts:
+                self.store.db.executemany("INSERT INTO memory_fts_v2 VALUES(?,?,?)", fts_rows)
+            for item, mid in zip(items, ids):
+                if item.get("raw_evidence") is not None:
+                    self.store._append_evidence(tenant_id, mid, str(item["raw_evidence"]), now)
+            self.store.db.execute(
+                """UPDATE embedding_migrations
+                   SET total_memories=total_memories+?,updated_at=? WHERE migration_id=?""",
+                (len(ids), now, migration_id),
+            )
+            self.store._refresh_ann_after_insert([tenant_id])
+        return ids
+
     def _get(self, migration_id: str) -> Any:
         row = self.store.db.execute(
             "SELECT * FROM embedding_migrations WHERE migration_id=?", (migration_id,)
