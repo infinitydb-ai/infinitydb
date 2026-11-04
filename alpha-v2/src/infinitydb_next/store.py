@@ -36,8 +36,6 @@ CREATE TABLE IF NOT EXISTS embeddings (
  FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_embeddings_tenant ON embeddings(tenant_id, dimensions);
-CREATE INDEX IF NOT EXISTS idx_embeddings_tenant_model
- ON embeddings(tenant_id, dimensions, provider, model, model_revision);
 CREATE TABLE IF NOT EXISTS embedding_cache (
  tenant_id TEXT NOT NULL, content_hash TEXT NOT NULL,
  provider TEXT NOT NULL, model TEXT NOT NULL, model_revision TEXT NOT NULL,
@@ -74,6 +72,12 @@ class MemoryStore:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
         self._migrate_embedding_metadata()
+        # Legacy databases gain these columns in the migration above; only then
+        # can the composite index referencing them be created safely.
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_embeddings_tenant_model "
+            "ON embeddings(tenant_id, dimensions, provider, model, model_revision)"
+        )
         self._fts = self._init_fts()
 
     def _migrate_embedding_metadata(self) -> None:
