@@ -9,8 +9,9 @@ The current lexical candidate selector is latency-oriented and can prioritize re
 
 ## Optional HNSW ANN evaluation
 
-Install the optional backend with `pip install -e '.[ann]'`. The v2 API exposes
-`MemoryStore.search_vector_ann()` separately from exact `search_vector()`.
+Install the optional backend with `pip install -e '.[ann]'`. The Python store exposes
+`MemoryStore.search_vector_ann()` separately from exact `search_vector()`. Run
+`infinitydb-ann-bench --records 3000 --queries 100` for a reproducible local comparison.
 The ANN index is built lazily in memory for one tenant, dimension, provider,
 model and model revision. Candidate IDs are filtered against current SQLite
 tenant, temporal and kind constraints, then rescored with exact cosine
