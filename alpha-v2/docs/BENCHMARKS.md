@@ -12,13 +12,23 @@ The current lexical candidate selector is latency-oriented and can prioritize re
 Install the optional backend with `pip install -e '.[ann]'`. The Python store exposes
 `MemoryStore.search_vector_ann()` separately from exact `search_vector()`. Run
 `infinitydb-ann-bench --records 3000 --queries 100` for a reproducible local comparison.
-The ANN index is built lazily in memory for one tenant, dimension, provider,
-model and model revision. Candidate IDs are filtered against current SQLite
+The ANN index is built lazily for one tenant, dimension, provider, model and
+model revision. By default it is in-memory. For restart persistence, construct
+`MemoryStore(database_path, ann_index_dir=directory)`. Each partition uses a
+hashed filename (not a tenant-name filename), a JSON label manifest, a source
+fingerprint derived from ordered SQLite embedding rows, and an SHA-256 checksum
+of the native index. Index and manifest files are written through temporary
+files and atomic replacement; the manifest is replaced last. On open/search,
+a missing, stale, version-mismatched or checksum-invalid index is rebuilt from
+SQLite, which remains authoritative. This persistence mode is single-process;
+concurrent writers/process coordination and online compaction are not yet
+implemented. Candidate IDs are filtered against current SQLite
 tenant, temporal and kind constraints, then rescored with exact cosine
 similarity and memory confidence. Updating an embedding invalidates that
 tenant's cached ANN partitions.
 
 Report recall@k against exact `search_vector()` on the same corpus and query
 set, along with index build time, warm/cold p50/p95/p99, RAM, CPU and index
-parameters. The optional backend is not a persistent or distributed index,
-and no performance or recall claim should be made without measured results.
+parameters. The optional backend is not a distributed index, and no performance or recall
+claim should be made without measured results. The persistence path is covered
+by tests for restart reload, source-change invalidation and corrupt-file recovery.
