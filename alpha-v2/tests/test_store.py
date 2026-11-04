@@ -579,6 +579,10 @@ class FakeHNSWIndex:
         self.vectors = {}
 
     def init_index(self, max_elements, ef_construction, M):
+        type(self).init_calls += 1
+        self.max_elements = max_elements
+
+    def resize_index(self, max_elements):
         self.max_elements = max_elements
 
     def add_items(self, vectors, labels, num_threads=1):
@@ -807,3 +811,66 @@ def test_persistent_ann_rebuilds_corrupt_index_file(monkeypatch):
         )
         assert [hit.memory.id for hit in hits] == [memory_id]
         second.close()
+
+
+
+def test_single_embedding_ingestion_updates_warm_ann_index_incrementally(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    FakeHNSWIndex.init_calls = 0
+    with tempfile.TemporaryDirectory() as directory:
+        store = MemoryStore(Path(directory) / "incremental.sqlite")
+        first = store.add_memory_with_embedding(
+            "initial warm index item", FakeEmbeddingProvider([[0.0, 1.0]]),
+            tenant_id="incremental",
+        )
+        store.search_vector_ann(
+            [1.0, 0.0], tenant_id="incremental", provider="fake", model="test-embed"
+        )
+        assert FakeHNSWIndex.init_calls == 1
+
+        second = store.add_memory_with_embedding(
+            "incremental appended item", FakeEmbeddingProvider([[1.0, 0.0]]),
+            tenant_id="incremental",
+        )
+        hits = store.search_vector_ann(
+            [1.0, 0.0], tenant_id="incremental", provider="fake", model="test-embed"
+        )
+        assert hits[0].memory.id == second
+        assert first in [hit.memory.id for hit in hits]
+        assert FakeHNSWIndex.init_calls == 1
+        store.close()
+
+
+def test_batch_embedding_ingestion_updates_warm_ann_index_incrementally(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    FakeHNSWIndex.init_calls = 0
+    with tempfile.TemporaryDirectory() as directory:
+        store = MemoryStore(Path(directory) / "batch-incremental.sqlite")
+        store.add_memory_with_embedding(
+            "batch initial item", FakeEmbeddingProvider([[0.0, 1.0]]),
+            tenant_id="batch-incremental",
+        )
+        store.search_vector_ann(
+            [1.0, 0.0], tenant_id="batch-incremental",
+            provider="fake", model="test-embed",
+        )
+        appended = store.add_memories_with_embeddings(
+            [
+                {"content": "batch appended one", "tenant_id": "batch-incremental"},
+                {"content": "batch appended two", "tenant_id": "batch-incremental"},
+            ],
+            FakeEmbeddingProvider([[1.0, 0.0], [0.8, 0.2]]),
+        )
+        hits = store.search_vector_ann(
+            [1.0, 0.0], tenant_id="batch-incremental",
+            provider="fake", model="test-embed",
+        )
+        assert set(appended).issubset({hit.memory.id for hit in hits})
+        assert FakeHNSWIndex.init_calls == 1
+        store.close()
