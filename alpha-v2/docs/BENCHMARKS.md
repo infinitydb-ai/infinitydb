@@ -21,8 +21,11 @@ of the native index. Index and manifest files are written through temporary
 files and atomic replacement; the manifest is replaced last. On open/search,
 a missing, stale, version-mismatched or checksum-invalid index is rebuilt from
 SQLite, which remains authoritative. This persistence mode is single-process;
-concurrent writers/process coordination and online compaction are not yet
-implemented. Candidate IDs are filtered against current SQLite
+cross-process writer coordination is not yet implemented. `delete_embedding()`
+removes a tenant-owned vector while preserving its memory and evidence, then
+invalidates the local ANN cache. `compact_ann_index()` explicitly rebuilds one
+tenant/model/dimension partition from SQLite and removes empty persisted
+partitions. Candidate IDs are filtered against current SQLite
 tenant, temporal and kind constraints, then rescored with exact cosine
 similarity and memory confidence. Updating an embedding invalidates that
 tenant's cached ANN partitions. New provider-backed single and batch ingestion
