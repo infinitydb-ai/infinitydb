@@ -50,6 +50,7 @@ def run(adapter: Any, records: int, queries: int, tenants: int, top_k: int) -> d
     ingest_seconds: list[float] = []
     search_seconds: list[float] = []
     expected: list[tuple[str, str, str, list[float]]] = []
+    tenant_by_id = {f"memory-{index:08d}": f"tenant-{index % tenants}" for index in range(records)}
     tracemalloc.start()
     started = time.perf_counter()
     try:
@@ -130,11 +131,6 @@ def main() -> int:
     if min(args.records, args.queries, args.tenants, args.top_k) < 1 or args.queries > args.records:
         parser.error("records, queries, tenants and top-k must be positive; queries <= records")
 
-    global tenant_by_id
-    tenant_by_id = {
-        f"memory-{index:08d}": f"tenant-{index % args.tenants}"
-        for index in range(args.records)
-    }
     comparisons: dict[str, Any] = {}
     for spec in args.adapter:
         factory = load_factory(spec)
