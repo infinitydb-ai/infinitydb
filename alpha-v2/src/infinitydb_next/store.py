@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import math
 import sqlite3
@@ -35,6 +36,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
  FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_embeddings_tenant ON embeddings(tenant_id, dimensions);
+CREATE INDEX IF NOT EXISTS idx_embeddings_tenant_model
+ ON embeddings(tenant_id, dimensions, provider, model, model_revision);
 CREATE TABLE IF NOT EXISTS embedding_cache (
  tenant_id TEXT NOT NULL, content_hash TEXT NOT NULL,
  provider TEXT NOT NULL, model TEXT NOT NULL, model_revision TEXT NOT NULL,
