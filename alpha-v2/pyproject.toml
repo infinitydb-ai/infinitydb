@@ -13,10 +13,12 @@ dependencies = []
 
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn>=0.27"]
+ann = ["hnswlib>=0.8.0"]
 test = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110"]
 
 [project.scripts]
 infinitydb-bench = "infinitydb_next.benchmark:main"
+infinitydb-ann-bench = "infinitydb_next.ann_benchmark:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

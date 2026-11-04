@@ -67,6 +67,7 @@ class MemoryStore:
         self.path = str(path)
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self._lock = threading.RLock()
+        self._ann_cache: dict[tuple[str, int, str, str, str | None], tuple[Any, list[str]]] = {}
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.execute("PRAGMA temp_store=MEMORY")
         self.db.row_factory = sqlite3.Row
@@ -99,6 +100,14 @@ class MemoryStore:
     def _tenant_key(tenant_id: str) -> str:
         return "tenant_" + hashlib.sha256(tenant_id.encode()).hexdigest()[:24]
 
+    def _invalidate_ann(self, tenant_ids: Iterable[str]) -> None:
+        affected = set(tenant_ids)
+        if affected:
+            self._ann_cache = {
+                key: cached for key, cached in self._ann_cache.items()
+                if key[0] not in affected
+            }
+
     def _init_fts(self) -> bool:
         try:
             self.db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_v2
@@ -121,6 +130,7 @@ class MemoryStore:
 
     def close(self) -> None:
         with self._lock:
+            self._ann_cache.clear()
             self.db.close()
 
     def __enter__(self) -> MemoryStore:
@@ -362,6 +372,7 @@ class MemoryStore:
             )
             if raw_evidence is not None:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
+            self._invalidate_ann([tenant_id])
         return mid
 
     def add_memories_with_embeddings(
@@ -432,6 +443,7 @@ class MemoryStore:
             )
             if self._fts:
                 self.db.executemany("INSERT INTO memory_fts_v2 VALUES(?,?,?)", fts_rows)
+            self._invalidate_ann(tenants)
         return ids
 
     def _append_evidence(self, tenant: str, mid: str, raw: str, now: float) -> str:
@@ -581,6 +593,122 @@ class MemoryStore:
                 (memory_id, tenant_id, len(values), json.dumps(values, separators=(",", ":")),
                  provider, model, model_revision),
             )
+            self._invalidate_ann([tenant_id])
+
+    def search_vector_ann(
+        self,
+        query_embedding: Iterable[float],
+        *,
+        tenant_id: str,
+        provider: str,
+        model: str,
+        model_revision: str | None = None,
+        limit: int = 10,
+        kinds: Iterable[str] | None = None,
+        as_of: float | None = None,
+        ef_search: int = 64,
+        candidate_multiplier: int = 8,
+    ) -> list[SearchHit]:
+        """Search a tenant/model-partitioned in-memory HNSW index.
+
+        Install the optional ANN extra with pip install infinitydb-next[ann].
+        HNSW supplies candidates; SQLite applies current temporal/kind filters
+        and exact cosine rescoring. Indexes rebuild lazily from canonical SQLite
+        embeddings and are invalidated whenever that tenant's embeddings change.
+        """
+        if limit < 1:
+            return []
+        if not tenant_id or not provider.strip() or not model.strip():
+            raise ValueError("tenant_id, provider and model are required for ANN search")
+        if model_revision is not None and not model_revision.strip():
+            raise ValueError("model_revision must be non-empty when provided")
+        if ef_search < 1 or candidate_multiplier < 1:
+            raise ValueError("ef_search and candidate_multiplier must be positive")
+
+        query = self._validated_vector(query_embedding)
+        try:
+            import hnswlib
+        except ImportError as exc:
+            raise RuntimeError(
+                "HNSW support is optional; install with pip install infinitydb-next[ann]"
+            ) from exc
+
+        key = (tenant_id, len(query), provider, model, model_revision)
+        now = time.time() if as_of is None else as_of
+        kind_values = list(kinds or [])
+        kind_clause = (
+            " AND m.kind IN (" + ",".join("?" for _ in kind_values) + ")"
+            if kind_values else ""
+        )
+
+        with self._lock:
+            cached = self._ann_cache.get(key)
+            if cached is None:
+                source_rows = self.db.execute(
+                    """SELECT memory_id,vector_json FROM embeddings
+                       WHERE tenant_id=? AND dimensions=? AND provider=? AND model=?
+                         AND model_revision IS ?
+                       ORDER BY memory_id""",
+                    key,
+                ).fetchall()
+                if not source_rows:
+                    return []
+                labels = [row["memory_id"] for row in source_rows]
+                vectors = [json.loads(row["vector_json"]) for row in source_rows]
+                index = hnswlib.Index(space="cosine", dim=len(query))
+                index.init_index(max_elements=len(vectors), ef_construction=200, M=16)
+                index.add_items(vectors, list(range(len(vectors))), num_threads=1)
+                index.set_ef(max(ef_search, min(len(vectors), 64)))
+                cached = (index, labels)
+                self._ann_cache[key] = cached
+
+            index, labels = cached
+            total = len(labels)
+            candidate_count = min(total, max(limit * candidate_multiplier, 64, ef_search))
+            query_norm = math.sqrt(sum(value * value for value in query))
+            scored: list[tuple[sqlite3.Row, float]] = []
+
+            while True:
+                index.set_ef(max(ef_search, candidate_count))
+                found, _ = index.knn_query([query], k=candidate_count, num_threads=1)
+                memory_ids = [labels[int(label)] for label in found[0]]
+                eligible_rows: list[sqlite3.Row] = []
+                for offset in range(0, len(memory_ids), 400):
+                    chunk = memory_ids[offset:offset + 400]
+                    placeholders = ",".join("?" for _ in chunk)
+                    eligible_rows.extend(self.db.execute(
+                        f"""SELECT m.*,e.vector_json FROM embeddings e
+                            JOIN memories m ON m.id=e.memory_id AND m.tenant_id=e.tenant_id
+                            WHERE e.tenant_id=? AND e.provider=? AND e.model=?
+                              AND e.model_revision IS ? AND e.memory_id IN ({placeholders})
+                              AND m.valid_from<=? AND (m.valid_to IS NULL OR m.valid_to>?)
+                              {kind_clause}""",
+                        [tenant_id, provider, model, model_revision, *chunk,
+                         now, now, *kind_values],
+                    ).fetchall())
+
+                scored = []
+                for row in eligible_rows:
+                    vector = json.loads(row["vector_json"])
+                    norm = math.sqrt(sum(value * value for value in vector))
+                    if norm == 0 or len(vector) != len(query):
+                        continue
+                    cosine = sum(a * b for a, b in zip(query, vector)) / (query_norm * norm)
+                    score = max(-1.0, min(1.0, cosine)) * float(row["confidence"])
+                    scored.append((row, score))
+
+                if len(scored) >= limit or candidate_count >= total:
+                    break
+                candidate_count = min(total, candidate_count * 2)
+
+            top_rows = heapq.nsmallest(
+                limit, scored,
+                key=lambda item: (-item[1], -item[0]["created_at"], item[0]["id"]),
+            )
+            return [
+                SearchHit(self._to_memory(row), score, ["ann_vector"])
+                for row, score in top_rows
+            ]
 
     def search_vector(self, query_embedding: Iterable[float], *,
                       tenant_id: str = "default", limit: int = 10,
