@@ -115,6 +115,50 @@ class MemoryStore:
                 if key[0] not in affected
             }
 
+    def _refresh_ann_after_insert(self, tenant_ids: Iterable[str]) -> None:
+        """Append newly committed vectors to warm ANN partitions without a full rebuild.
+
+        If the optional HNSW backend cannot resize/update an index, discard that
+        cache entry; the next query safely reconstructs it from canonical SQLite.
+        """
+        affected = set(tenant_ids)
+        if not affected:
+            return
+        for key, cached in list(self._ann_cache.items()):
+            tenant, dimensions, provider, model, revision = key
+            if tenant not in affected:
+                continue
+            index, labels = cached
+            rows = self.db.execute(
+                """SELECT memory_id,vector_json FROM embeddings
+                   WHERE tenant_id=? AND dimensions=? AND provider=? AND model=?
+                     AND model_revision IS ?
+                   ORDER BY memory_id""",
+                key,
+            ).fetchall()
+            current_ids = [row["memory_id"] for row in rows]
+            known = set(labels)
+            new_rows = [row for row in rows if row["memory_id"] not in known]
+            if not new_rows:
+                continue
+            try:
+                resize = getattr(index, "resize_index", None)
+                if resize is None:
+                    raise RuntimeError("HNSW backend does not support index resizing")
+                resize(len(current_ids))
+                new_labels = list(range(len(labels), len(labels) + len(new_rows)))
+                index.add_items(
+                    [json.loads(row["vector_json"]) for row in new_rows],
+                    new_labels,
+                    num_threads=1,
+                )
+                labels.extend(row["memory_id"] for row in new_rows)
+                fingerprint = self._ann_source_fingerprint(rows)
+                self._save_persisted_ann(index, key, fingerprint, labels)
+                self._ann_cache[key] = (index, labels)
+            except Exception:
+                self._ann_cache.pop(key, None)
+
 
     def _ann_partition_paths(
         self, key: tuple[str, int, str, str, str | None]
@@ -472,7 +516,7 @@ class MemoryStore:
             )
             if raw_evidence is not None:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
-            self._invalidate_ann([tenant_id])
+            self._refresh_ann_after_insert([tenant_id])
         return mid
 
     def add_memories_with_embeddings(
@@ -543,7 +587,7 @@ class MemoryStore:
             )
             if self._fts:
                 self.db.executemany("INSERT INTO memory_fts_v2 VALUES(?,?,?)", fts_rows)
-            self._invalidate_ann(tenants)
+            self._refresh_ann_after_insert(tenants)
         return ids
 
     def _append_evidence(self, tenant: str, mid: str, raw: str, now: float) -> str:
