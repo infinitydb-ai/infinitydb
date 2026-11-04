@@ -81,3 +81,69 @@ def test_migration_rejects_new_memory_after_snapshot(tmp_path):
             manager.activate(migration)
     finally:
         store.close()
+
+
+class ActiveProvider:
+    model_info = EmbeddingModel("active", "old-model", 2)
+
+    def embed(self, texts):
+        return [[1.0, float(len(text))] for text in texts]
+
+
+class FailingProvider(FakeProvider):
+    def embed(self, texts):
+        raise RuntimeError("target provider unavailable")
+
+
+def test_dual_write_keeps_migration_complete_for_new_memories(tmp_path):
+    store = MemoryStore(tmp_path / "dual-write.sqlite")
+    try:
+        first = store.add_memory("first", tenant_id="tenant")
+        store.set_embedding(first, [1, 0], tenant_id="tenant",
+                            provider="active", model="old-model")
+        target = FakeProvider()
+        manager = EmbeddingMigrationManager(store)
+        migration = manager.begin(
+            target, tenant_id="tenant", model_revision="r2",
+            config_fingerprint="target-config",
+        )
+        manager.migrate_batch(migration, target)
+
+        new_id = manager.add_memory_with_dual_embedding(
+            migration, "arrived during migration", ActiveProvider(), target,
+            tenant_id="tenant", migration_model_revision="r2",
+            migration_config_fingerprint="target-config",
+        )
+        status = manager.status(migration)
+        assert status["total"] == 2
+        assert status["completed"] == 2
+        assert status["remaining"] == 0
+        assert store.db.execute(
+            "SELECT provider,model FROM embeddings WHERE memory_id=?", (new_id,)
+        ).fetchone()[:] == ("active", "old-model")
+        assert manager.activate(migration)["status"] == "active"
+        target_rows = store.db.execute(
+            "SELECT provider,model,model_revision FROM embeddings WHERE tenant_id='tenant'"
+        ).fetchall()
+        assert {(row["provider"], row["model"], row["model_revision"])
+                for row in target_rows} == {("fake", "new-model", "r2")}
+    finally:
+        store.close()
+
+
+def test_dual_write_provider_failure_persists_nothing(tmp_path):
+    store = MemoryStore(tmp_path / "dual-write-failure.sqlite")
+    try:
+        target = FakeProvider()
+        manager = EmbeddingMigrationManager(store)
+        migration = manager.begin(target, tenant_id="tenant")
+        with pytest.raises(RuntimeError, match="unavailable"):
+            manager.add_memory_with_dual_embedding(
+                migration, "must not persist", ActiveProvider(), FailingProvider(),
+                tenant_id="tenant",
+            )
+        assert store.stats(tenant_id="tenant")["memories"] == 0
+        assert manager.status(migration)["total"] == 0
+        assert manager.status(migration)["completed"] == 0
+    finally:
+        store.close()
