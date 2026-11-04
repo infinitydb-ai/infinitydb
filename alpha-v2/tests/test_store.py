@@ -669,3 +669,37 @@ def test_ann_search_applies_current_temporal_and_kind_filters(store, monkeypatch
     )
     assert [hit.memory.id for hit in hits] == [current]
 
+def test_ann_cache_invalidated_by_provider_backed_single_and_batch_ingestion(store, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    first = store.add_memory_with_embedding(
+        "first provider-backed memory",
+        FakeEmbeddingProvider([[0.0, 1.0]]),
+        tenant_id="ann-ingest",
+    )
+    before = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-ingest", provider="fake", model="test-embed"
+    )
+    assert [hit.memory.id for hit in before] == [first]
+
+    second = store.add_memory_with_embedding(
+        "second provider-backed memory",
+        FakeEmbeddingProvider([[1.0, 0.0]]),
+        tenant_id="ann-ingest",
+    )
+    after_single = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-ingest", provider="fake", model="test-embed"
+    )
+    assert [hit.memory.id for hit in after_single][0] == second
+
+    ids = store.add_memories_with_embeddings(
+        [{"content": "third provider-backed memory", "tenant_id": "ann-ingest"}],
+        FakeEmbeddingProvider([[0.8, 0.2]]),
+    )
+    after_batch = store.search_vector_ann(
+        [1.0, 0.0], tenant_id="ann-ingest", provider="fake", model="test-embed"
+    )
+    assert ids[0] in [hit.memory.id for hit in after_batch]
+
