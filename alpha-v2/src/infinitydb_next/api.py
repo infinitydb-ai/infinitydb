@@ -119,6 +119,16 @@ def set_embedding(memory_id: str, body: SetEmbeddingRequest,
     return {"stored": True}
 
 
+@app.delete("/v1/memories/{memory_id}/embedding")
+def delete_embedding(memory_id: str,
+                     tenant_id: str = Depends(authenticated_tenant)) -> dict[str, bool]:
+    try:
+        deleted = store.delete_embedding(memory_id, tenant_id=tenant_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"deleted": deleted}
+
+
 @app.post("/v1/search/vector")
 def vector_search(body: VectorSearchRequest,
                   tenant_id: str = Depends(authenticated_tenant)) -> list[dict[str, Any]]:
