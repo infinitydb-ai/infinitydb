@@ -1,4 +1,4 @@
-"""Zep Cloud adapter using graph episode ingestion and episode search."""
+"""Zep Cloud v4 adapter using user graphs and episode search."""
 from __future__ import annotations
 
 import os
@@ -15,14 +15,20 @@ class ZepCloudAdapter:
         except ImportError as exc:
             raise RuntimeError("Install adapter dependency: pip install zep-cloud") from exc
         self.client = Zep(api_key=api_key)
+        self._users: dict[str, str] = {}
         self._ids: dict[str, str] = {}
+
+    def _user_uuid(self, tenant_id: str) -> str:
+        if tenant_id not in self._users:
+            user = self.client.user.create(first_name="Benchmark", last_name=tenant_id)
+            self._users[tenant_id] = str(user.uuid_)
+        return self._users[tenant_id]
 
     def add(self, memory_id: str, tenant_id: str, content: str, vector: list[float]) -> None:
         result = self.client.graph.episode.add(
-            user_id=tenant_id,
+            self._user_uuid(tenant_id),
             type="text",
             data=content,
-            reference_time=None,
         )
         episode = getattr(result, "episode", None)
         remote_id = getattr(episode, "uuid_", None) or getattr(episode, "uuid", None)
@@ -31,8 +37,10 @@ class ZepCloudAdapter:
         self._ids[memory_id] = str(remote_id)
 
     def search(self, tenant_id: str, query: str, vector: list[float], limit: int) -> list[str]:
+        if tenant_id not in self._users:
+            return []
         result = self.client.graph.search_episodes(
-            user_id=tenant_id,
+            self._users[tenant_id],
             query=query[:256],
             limit=limit,
         )
@@ -48,8 +56,9 @@ class ZepCloudAdapter:
     def metadata(self) -> dict[str, Any]:
         return {
             "system": "Zep Cloud",
+            "api": "v4",
             "deployment": "managed cloud",
-            "ingestion": "graph episode",
+            "ingestion": "user graph episodes",
             "retrieval": "episode search",
             "embedding": "managed by Zep",
         }
