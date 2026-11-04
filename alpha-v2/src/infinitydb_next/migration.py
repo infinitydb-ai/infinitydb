@@ -6,6 +6,7 @@ outside write transactions and can safely be retried batch by batch.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -264,7 +265,7 @@ class EmbeddingMigrationManager:
             raise ValueError("tenant_id must not be empty")
         if not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError("confidence must be between 0 and 1")
-        if migration_model_revision != (migration_model_revision or "").strip() and migration_model_revision is not None:
+        if migration_model_revision is not None and not migration_model_revision.strip():
             raise ValueError("migration_model_revision must be non-empty")
         if not migration_config_fingerprint.strip() or not active_config_fingerprint.strip():
             raise ValueError("config fingerprints must be non-empty")
@@ -291,7 +292,7 @@ class EmbeddingMigrationManager:
             entries, migration_provider, provider_name=target_name, model_name=target_model,
             revision=migration_model_revision, config_fingerprint=migration_config_fingerprint,
         )
-        digest = __import__("hashlib").sha256(content.encode()).hexdigest()
+        digest = hashlib.sha256(content.encode()).hexdigest()
         active_vector = active_vectors[(tenant_id, digest)]
         target_vector = target_vectors[(tenant_id, digest)]
         now = time.time()
