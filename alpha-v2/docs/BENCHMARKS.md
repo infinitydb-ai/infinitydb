@@ -25,7 +25,9 @@ concurrent writers/process coordination and online compaction are not yet
 implemented. Candidate IDs are filtered against current SQLite
 tenant, temporal and kind constraints, then rescored with exact cosine
 similarity and memory confidence. Updating an embedding invalidates that
-tenant's cached ANN partitions.
+tenant's cached ANN partitions. New provider-backed single and batch ingestion
+is appended to a warm partition when the backend supports resizing; otherwise
+the cache is discarded and rebuilt on the next query.
 
 Report recall@k against exact `search_vector()` on the same corpus and query
 set, along with index build time, warm/cold p50/p95/p99, RAM, CPU and index
