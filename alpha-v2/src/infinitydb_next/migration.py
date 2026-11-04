@@ -7,6 +7,7 @@ outside write transactions and can safely be retried batch by batch.
 from __future__ import annotations
 
 import hashlib
+import hashlib
 import json
 import math
 import time
@@ -413,7 +414,7 @@ class EmbeddingMigrationManager:
             if not math.isfinite(confidence) or not 0 <= confidence <= 1:
                 raise ValueError("confidence must be between 0 and 1")
             mid = str(item.get("memory_id") or uuid.uuid4())
-            digest = __import__("hashlib").sha256(content.encode()).hexdigest()
+            digest = hashlib.sha256(content.encode()).hexdigest()
             active_vector = active_vectors[(tenant_id, digest)]
             target_vector = target_vectors[(tenant_id, digest)]
             created = float(item.get("created_at") or now)
