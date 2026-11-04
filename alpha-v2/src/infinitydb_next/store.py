@@ -195,7 +195,10 @@ class MemoryStore:
                 manifest.get("format_version") != 1
                 or manifest.get("dimensions") != key[1]
                 or manifest.get("source_fingerprint") != fingerprint
-                or manifest.get("labels") != expected_labels
+                or not isinstance(manifest.get("labels"), list)
+                or len(manifest["labels"]) != len(expected_labels)
+                or len(set(manifest["labels"])) != len(expected_labels)
+                or set(manifest["labels"]) != set(expected_labels)
                 or not index_path.is_file()
             ):
                 return None
@@ -204,7 +207,7 @@ class MemoryStore:
                 return None
             index = hnswlib.Index(space="cosine", dim=key[1])
             index.load_index(str(index_path), max_elements=len(expected_labels))
-            return index, expected_labels
+            return index, manifest["labels"]
         except (OSError, ValueError, RuntimeError, json.JSONDecodeError, TypeError):
             return None
 
