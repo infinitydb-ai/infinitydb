@@ -149,6 +149,7 @@ class MemoryStore:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if (
                 manifest.get("format_version") != 1
+                or manifest.get("dimensions") != key[1]
                 or manifest.get("source_fingerprint") != fingerprint
                 or manifest.get("labels") != expected_labels
                 or not index_path.is_file()
