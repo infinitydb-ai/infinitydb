@@ -60,3 +60,24 @@ model-free `add_memory` and `add_memories` calls do not invoke embedding
 providers and are not automatically dual-written. Continue using
 `migrate_batch` for the original snapshot, then activate after
 `status()["remaining"]` reaches zero.
+
+
+Batch ingestion uses the same fail-closed dual-write guarantee:
+
+```python
+ids = migrations.add_memories_with_dual_embeddings(
+    migration_id,
+    [
+        {"content": "First arriving memory", "tenant_id": "acme"},
+        {"content": "Second arriving memory", "tenant_id": "acme"},
+    ],
+    active_provider,
+    target_provider,
+    tenant_id="acme",
+    migration_model_revision="nomic-embed-text:latest",
+)
+```
+
+The batch is committed as one SQLite transaction across memories, active
+vectors, staged vectors, cache entries, and migration progress. Do not mix
+tenants in one call; each batch is explicitly scoped to one tenant.
