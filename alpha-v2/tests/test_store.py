@@ -874,3 +874,39 @@ def test_batch_embedding_ingestion_updates_warm_ann_index_incrementally(monkeypa
         assert set(appended).issubset({hit.memory.id for hit in hits})
         assert FakeHNSWIndex.init_calls == 1
         store.close()
+
+
+
+def test_incrementally_persisted_ann_keeps_label_mapping_after_restart(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "hnswlib", SimpleNamespace(Index=FakeHNSWIndex))
+    FakeHNSWIndex.load_calls = 0
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "incremental-persist.sqlite"
+        index_dir = Path(directory) / "ann"
+        first_store = MemoryStore(database, ann_index_dir=index_dir)
+        first_id = first_store.add_memory_with_embedding(
+            "z initial vector", FakeEmbeddingProvider([[0.0, 1.0]]),
+            tenant_id="persist-incremental",
+        )
+        first_store.search_vector_ann(
+            [1.0, 0.0], tenant_id="persist-incremental",
+            provider="fake", model="test-embed",
+        )
+        second_id = first_store.add_memory_with_embedding(
+            "a appended vector", FakeEmbeddingProvider([[1.0, 0.0]]),
+            tenant_id="persist-incremental",
+        )
+        first_store.close()
+
+        second_store = MemoryStore(database, ann_index_dir=index_dir)
+        hits = second_store.search_vector_ann(
+            [1.0, 0.0], tenant_id="persist-incremental",
+            provider="fake", model="test-embed",
+        )
+        assert hits[0].memory.id == second_id
+        assert {first_id, second_id}.issubset({hit.memory.id for hit in hits})
+        assert FakeHNSWIndex.load_calls == 1
+        second_store.close()
