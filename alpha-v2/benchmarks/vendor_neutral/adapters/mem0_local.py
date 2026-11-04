@@ -36,7 +36,7 @@ class Mem0LocalAdapter:
         self._ids[memory_id] = str(rows[0]["id"])
 
     def search(self, tenant_id: str, query: str, vector: list[float], limit: int) -> list[str]:
-        result = self.memory.search(query, user_id=tenant_id, limit=limit)
+        result = self.memory.search(query, filters={"user_id": tenant_id}, top_k=limit)
         rows = result.get("results", []) if isinstance(result, dict) else []
         reverse = {value: key for key, value in self._ids.items()}
         return [reverse[str(row["id"])] for row in rows if str(row.get("id")) in reverse]
