@@ -22,9 +22,7 @@ cd alpha-v2
 python -m venv .venv
 # Windows: .venv\\Scripts\\activate
 # Linux/macOS: source .venv/bin/activate
-pip install -e '.[test]'
-# Optional HNSW approximate-nearest-neighbor support:
-pip install -e '.[ann]'
+pip install -e '.[test,ann]'
 pytest -q
 ```
 
@@ -37,7 +35,7 @@ npm test
 
 ## Explicit alpha limitations
 
-HNSW ANN is optional and currently uses lazily rebuilt in-memory indexes; it does not yet provide durable ANN index files, online index compaction, managed embedding lifecycle/model migration, predictive prefetch, autonomous consolidation, multi-agent federation, encryption-at-rest or MCP transport. Exact vector search scans eligible stored embeddings and remains the deterministic correctness baseline. The optional HNSW method is approximate; it partitions indexes by tenant and embedding model identity, then applies SQLite temporal/kind filters and exact cosine rescoring to the retrieved candidates. It may trade recall for latency and should be evaluated on the target corpus. Callers must generate embeddings and keep model/version consistency themselves. The REST adapter now requires API-key-to-tenant mapping for data routes; TLS termination, rate limiting, secret rotation automation and deployment hardening remain operator responsibilities. The token estimate is not tokenizer-accurate. Evidence hash chains detect alteration but do not prove authorship.
+HNSW ANN is optional and currently uses lazily rebuilt in-memory indexes; it does not yet provide durable ANN index files, online index compaction, managed embedding lifecycle/model migration, predictive prefetch, autonomous consolidation, multi-agent federation, encryption-at-rest or MCP transport. Exact vector search scans eligible stored embeddings and remains the deterministic correctness baseline. The optional HNSW method is approximate; it partitions indexes by tenant and embedding model identity, then applies SQLite temporal/kind filters and exact cosine rescoring to the retrieved candidates. It may trade recall for latency and should be evaluated on the target corpus. Run `infinitydb-ann-bench --records 3000 --queries 100` to measure recall@k and exact-versus-ANN latency on a deterministic synthetic corpus. Callers must generate embeddings and keep model/version consistency themselves. The REST adapter now requires API-key-to-tenant mapping for data routes; TLS termination, rate limiting, secret rotation automation and deployment hardening remain operator responsibilities. The token estimate is not tokenizer-accurate. Evidence hash chains detect alteration but do not prove authorship.
 
 Benchmark artifacts are workload-specific synthetic measurements; they are not competitor comparisons or production guarantees. See `docs/BENCHMARKS.md` before publishing performance claims.
 
