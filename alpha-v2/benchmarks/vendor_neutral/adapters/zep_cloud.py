@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 
@@ -35,6 +36,20 @@ class ZepCloudAdapter:
         if not remote_id:
             raise RuntimeError(f"Zep episode ingestion returned no episode UUID: {result!r}")
         self._ids[memory_id] = str(remote_id)
+        task = getattr(result, "task", None)
+        task_uuid = getattr(task, "uuid_", None) if task is not None else None
+        if task_uuid:
+            deadline = time.monotonic() + 600
+            while True:
+                current = self.client.task.get(str(task_uuid))
+                status = str(getattr(current, "status", "")).lower()
+                if status == "succeeded":
+                    break
+                if status in {"failed", "partial", "canceled", "invalid"}:
+                    raise RuntimeError(f"Zep episode indexing task ended with status {status}")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Zep indexing task {task_uuid} did not finish within 600 seconds")
+                time.sleep(1)
 
     def search(self, tenant_id: str, query: str, vector: list[float], limit: int) -> list[str]:
         if tenant_id not in self._users:
