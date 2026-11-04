@@ -100,6 +100,14 @@ class MemoryStore:
     def _tenant_key(tenant_id: str) -> str:
         return "tenant_" + hashlib.sha256(tenant_id.encode()).hexdigest()[:24]
 
+    def _invalidate_ann(self, tenant_ids: Iterable[str]) -> None:
+        affected = set(tenant_ids)
+        if affected:
+            self._ann_cache = {
+                key: cached for key, cached in self._ann_cache.items()
+                if key[0] not in affected
+            }
+
     def _init_fts(self) -> bool:
         try:
             self.db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_v2
@@ -158,6 +166,7 @@ class MemoryStore:
                                 (mid, self._tenant_key(tenant_id), content))
             if raw_evidence is not None:
                 self._append_evidence(tenant_id, mid, raw_evidence, now)
+            self._invalidate_ann([tenant_id])
         return mid
 
     def supersede_memory(
@@ -434,6 +443,7 @@ class MemoryStore:
             )
             if self._fts:
                 self.db.executemany("INSERT INTO memory_fts_v2 VALUES(?,?,?)", fts_rows)
+            self._invalidate_ann(tenants)
         return ids
 
     def _append_evidence(self, tenant: str, mid: str, raw: str, now: float) -> str:
@@ -583,11 +593,7 @@ class MemoryStore:
                 (memory_id, tenant_id, len(values), json.dumps(values, separators=(",", ":")),
                  provider, model, model_revision),
             )
-            # ANN partitions are derived from canonical SQLite rows.
-            self._ann_cache = {
-                key: cached for key, cached in self._ann_cache.items()
-                if key[0] != tenant_id
-            }
+            self._invalidate_ann([tenant_id])
 
     def search_vector_ann(
         self,
