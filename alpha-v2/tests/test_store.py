@@ -571,6 +571,7 @@ def test_vector_top_k_respects_model_revision_and_tenant_filters(store):
     assert [hit.memory.id for hit in hits] == [second]
 
 class FakeHNSWIndex:
+    init_calls = 0
     load_calls = 0
 
     def __init__(self, space, dim):
