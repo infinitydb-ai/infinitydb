@@ -61,9 +61,8 @@ class PolicyRequest(BaseModel):
 def root() -> dict[str, Any]:
     return {
         "engine": "InfinityDB",
-        "version": "1.0.0",
-        "latency_target": "0.75ms",
-        "token_reduction": "81.4%",
+        "version": "1.1.0",
+        "token_reduction": None,  # not claimed: depends on caller prompt construction and tokenizer
         "extraction_cost": "$0",
         "docs_url": "/docs",
     }
@@ -105,7 +104,7 @@ def search_memory(req: SearchRequest) -> dict[str, Any]:
         "facts": facts,
         "count": len(facts),
         "latency_ms": res.get("latency_ms", 0.0),
-        "tokens_saved": res.get("tokens_saved", "81.4%"),
+        "tokens_saved": res.get("tokens_saved"),
     }
 
 

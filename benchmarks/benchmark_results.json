@@ -6,7 +6,6 @@
     "composite_accuracy": 66.7,
     "p50_ms": 0.32,
     "p95_ms": 0.58,
-    "token_saving": 81.4,
     "token_saving_measured": 63.2,
     "cost": "$0 (Local Rule/0.5B)",
     "throughput_items_per_sec": 2181.8
@@ -58,5 +57,6 @@
     "token_saving_measured": 42.9,
     "cost": "$45/mo",
     "throughput_items_per_sec": 513980.3
-  }
+  },
+  "_warning": "Competitor rows come from local architecture emulators, NOT the real products. Do not present as head-to-head results."
 }

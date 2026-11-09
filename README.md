@@ -34,12 +34,25 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 
 *   **Token-Aware Memory:** Stores raw multi-turn conversations and tool transcripts outside the model context. Actual token savings depend on the caller tokenizer and prompt construction.
 *   **Deterministic Fact Extraction:** L1 Atomic Facts are extracted with local rules and no LLM call. Extraction quality is limited to the implemented patterns; latency depends on workload and hardware.
-*   **Temporal Fact History:** Facts remain in their original provenance chain. Applications can explicitly mark a newer fact as superseding an older one and query memory as of a Unix timestamp; the engine does not guess semantic contradictions.
+*   **Temporal Fact History:** `add(..., ts=)` records when something happened. A newer single-valued fact (location, role, employer, identity, budget) automatically supersedes the older one, and `recall(..., as_of=ts)` returns what was current at that time. Multi-valued facts (preferences, relations) are never superseded automatically, and the engine does not infer contradictions between free-text facts; use `supersede_fact()` for those.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
 *   **Tenant-Scoped Guardrails (L4 Policies):** Combines global baseline policies with tenant-specific SOPs; a tenant's private policies are excluded from other tenants' recall.
 *   **Indexed Hybrid Retrieval:** SQLite FTS5 narrows keyword candidates; importance weighting and Ebbinghaus time-decay rank the retrieved facts. Latency depends on dataset, hardware, and workload.
 
 ---
+
+## Measured results (v1.1.0)
+
+Reproduce with `python benchmarks/update_tracking.py` and `python benchmarks/reproducible.py`. Synthetic, single machine, not a leaderboard.
+
+| Check | v1.0.0 | v1.1.0 |
+|---|---|---|
+| Update tracking: current answer ranked first (300 users, 1-4 moves each, 3,000 distractor facts) | 27% | 100% |
+| Update tracking: outdated fact in top 3 | 75% | 0% |
+| `benchmarks/reproducible.py` recall p50 / p95 | 9.1 / 12.4 ms | 1.2 / 1.9 ms |
+| Recall p50, 30,000 facts, query with a rare term | 1,667 ms | 0.4 ms |
+
+Limits: the update-tracking test only uses facts the built-in rules can parse ("I live in X", "I moved to X"); free-text facts outside those patterns are stored but not auto-superseded. Queries made only of very common words still scan many rows (25 ms at 30,000 facts).
 
 ## Benchmark status
 

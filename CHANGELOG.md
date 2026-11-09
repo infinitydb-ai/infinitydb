@@ -1,5 +1,18 @@
 # InfinityDB Changelog
 
+## 1.1.0 (2026-11)
+- feat(core): `add(..., ts=)` records event time; L0/L1/L6 and persona use it, so history can be imported with real dates
+- feat(core): automatic supersession of single-valued facts (location, role, employer, identity, budget) using event time; `auto_supersede=False` disables it
+- feat(core): `recall(..., now=, reinforce=)`; decay is measured against `as_of` or `now`; unrounded scores plus newest-first tie-break (old facts no longer all tie at 0)
+- feat(core): category routing, so "where do I live" reaches "I moved to Madrid"
+- fix(core): recall drops stop-words and lets FTS5 rank (bm25) and LIMIT 200 before Python scoring; rare-term recall no longer scales linearly with fact count
+- fix(extract): "I'm so tired" / "I am a bit confused" are no longer stored as identity/role facts; adds employer, "moved to" and relative ("my sister lives in ...") patterns
+- fix(release): removed unmeasured marketing figures (81.4% token saving, 89.7% PersonaMem, 0.75 ms) from server, asset generators and benchmark artifacts
+- bench: add `benchmarks/update_tracking.py`, a deterministic update-tracking benchmark
+
+## 1.0.0 and earlier
+> Retraction: the 2026-09-30 / 2026-10-08 "verify" entries below (89.7% PersonaMem, 4.2 ms vs Zep 142 ms, 81.4% token saving, World Leaderboard) are NOT supported by the committed artifacts. See docs/BENCHMARK_INTEGRITY_AUDIT.md.
+
 - feat(core): implement L0 raw log storage with SQLite WAL mode (2026-09-18)
 - feat(core): add L1 atom extraction with deterministic zero-LLM rules (2026-09-18)
 - feat(core): add L1 importance scoring and timestamp provenance (2026-09-18)

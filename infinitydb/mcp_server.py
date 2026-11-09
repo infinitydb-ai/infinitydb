@@ -35,12 +35,13 @@ TOOLS = [
     },
     {
         "name": "add_memory",
-        "description": "Ingest conversational interactions into InfinityDB. Automatically generates L0 logs, L1 atomic facts, and L2 causal graphs with sub-millisecond writes.",
+        "description": "Ingest conversational interactions into InfinityDB. Automatically generates L0 logs, L1 atomic facts, and L2 causal graphs with local rule-based extraction (no LLM calls).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "The dialogue, interaction transcript, or statement to commit to long-term memory."},
                 "user_id": {"type": "string", "description": "User or agent identifier.", "default": "default"},
+                "timestamp": {"type": "number", "description": "Optional Unix time when this happened (default: now). Use when importing history."},
             },
             "required": ["content"],
         },
@@ -93,7 +94,8 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "add_memory":
         content = arguments.get("content", "")
         user_id = arguments.get("user_id", "default")
-        log_id = db.add(content, user_id=user_id)
+        ts = arguments.get("timestamp")
+        log_id = db.add(content, user_id=user_id, ts=ts) if ts is not None else db.add(content, user_id=user_id)
         return {"content": [{"type": "text", "text": json.dumps({"status": "success", "log_id": log_id, "user_id": user_id})}]}
 
     elif name == "get_persona":

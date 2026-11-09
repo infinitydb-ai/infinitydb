@@ -280,14 +280,24 @@ class InfinityDB:
         user_id: str = "default",
         session_id: str | None = None,
         importance: float = 0.9,
+        ts: float | None = None,
+        auto_supersede: bool = True,
     ) -> str:
-        """Atomically ingest one conversation across all memory layers."""
+        """Atomically ingest one conversation across all memory layers.
+
+        ``ts`` is the Unix time the conversation happened (default: now). Pass it
+        when importing history so recall(as_of=...) and decay use event time.
+        ``auto_supersede`` marks an older single-valued fact (location, role,
+        employer, identity, budget) as superseded when a newer one arrives.
+        """
         with self.conn:
             return self._add(
                 conversation=conversation,
                 user_id=user_id,
                 session_id=session_id,
                 importance=importance,
+                ts=ts,
+                auto_supersede=auto_supersede,
             )
 
     def _add(
@@ -296,6 +306,8 @@ class InfinityDB:
         user_id: str = "default",
         session_id: str | None = None,
         importance: float = 0.9,
+        ts: float | None = None,
+        auto_supersede: bool = True,
     ) -> str:
         """Ingest raw conversation or tool log into L0-L6 Brain pipeline.
 
@@ -312,7 +324,12 @@ class InfinityDB:
         if not 0.0 <= float(importance) <= 1.0:
             raise ValueError("importance must be between 0 and 1")
 
-        now = time.time()
+        if ts is None:
+            now = time.time()
+        else:
+            if isinstance(ts, bool) or not isinstance(ts, (int, float)) or not math.isfinite(ts):
+                raise ValueError("ts must be a finite Unix timestamp")
+            now = float(ts)
         self._seq += 1
         log_id = f"L0_{self._sha256(conversation + str(now) + str(self._seq))[:16]}"
 
@@ -323,20 +340,24 @@ class InfinityDB:
         )
 
         # L1: Deterministic Zero-LLM Fact Extraction (Regex & Semantic Patterns)
+        # Lead-in phrases are case-insensitive via scoped (?i:...); captured values are not,
+        # so "I'm so tired" is NOT an identity fact, while "I'm Maria" is.
         patterns: list[tuple[str, str, float]] = [
-            (r"(?:I am|I'm|my name is)\s+([A-Z][a-zA-Z0-9_\-\s]+?)(?:[.,\n]|$)", "identity", 0.95),
-            (r"(?:I work as|I am a|my role is)\s+([^.,\n]+)", "role", 0.90),
-            (r"(?:I prefer|I like|I love|I use|my preference is)\s+([^.,\n]+)", "preference", 0.92),
-            (r"(?:I hate|I dislike|I avoid|never use)\s+([^.,\n]+)", "dislike", 0.88),
-            (r"(?:my budget is|budget of|budget:\s*)\s*([$€£¥]?[0-9,]+(?:\s*[kKmMbB])?)", "budget", 0.94),
-            (r"(?:I live in|based in|located in)\s+([^.,\n]+)", "location", 0.85),
-            (r"(?:our goal is|aiming to|target is|deadline is)\s+([^.,\n]+)", "goal", 0.91),
-            (r"(?:must comply with|required to|constraint:\s*)\s+([^.,\n]+)", "constraint", 0.95),
+            (r"(?i:I am|I['\u2019]m|my name is)\s+([A-Z][a-zA-Z0-9_\-]*(?:\s+[A-Z][a-zA-Z0-9_\-]*)*)", "identity", 0.95),
+            (r"(?i:I work as|my role is|I am an?|I['\u2019]m an?)\s+(?!(?i:bit|little|lot|few|big|huge|fan|bad|good|great|real|total|very|so|kind|sort)\b)([^.,\n]+)", "role", 0.90),
+            (r"(?i:I work (?:at|for)|I['\u2019]m working (?:at|for)|I joined|I am employed (?:at|by))\s+([^.,\n]+)", "employer", 0.90),
+            (r"(?i:I prefer|I like|I love|I use|my preference is)\s+([^.,\n]+)", "preference", 0.92),
+            (r"(?i:I hate|I dislike|I avoid|never use)\s+([^.,\n]+)", "dislike", 0.88),
+            (r"(?i:my budget is|budget of|budget:\s*)\s*([$\u20ac\u00a3\u00a5]?[0-9,]+(?:\s*[kKmMbB])?)", "budget", 0.94),
+            (r"(?i:I live in|I am living in|I['\u2019]m living in|I['\u2019]m based in|based in|located in|I moved to|I['\u2019]ve moved to|I relocated to)\s+([^.,\n]+)", "location", 0.85),
+            (r"(?i:our goal is|aiming to|target is|deadline is)\s+([^.,\n]+)", "goal", 0.91),
+            (r"(?i:must comply with|required to|constraint:\s*)\s+([^.,\n]+)", "constraint", 0.95),
+            (r"(?i:my (?:sister|brother|mother|father|mom|dad|wife|husband|partner|daughter|son|friend|colleague|boss|manager))\s+(?i:lives in|works (?:at|for)|moved to|is based in)\s+([^.,\n]+)", "relation", 0.80),
         ]
 
         extracted_atoms = []
         for pat, cat, weight in patterns:
-            for match in re.finditer(pat, conversation, re.IGNORECASE):
+            for match in re.finditer(pat, conversation):
                 extracted_fact = match.group(0).strip()
                 start_idx, end_idx = match.span()
                 atom_id = f"L1_{self._sha256(log_id + extracted_fact)[:16]}"
@@ -384,8 +405,12 @@ class InfinityDB:
                 (atom_id, proof_hash, log_id, snippet, start_idx, end_idx, now),
             )
 
+            # Automatic supersession of single-valued facts (event-time aware).
+            if auto_supersede and cat in self._SINGLE_VALUED:
+                self._auto_supersede(user_id, cat, atom_id, fact, now)
+
             # L3: Persona extraction with Conflict Auto-Resolution
-            if cat in ("identity", "role", "preference", "budget", "location", "dislike"):
+            if cat in ("identity", "role", "employer", "preference", "budget", "location", "dislike"):
                 self._update_persona_with_conflict_resolution(
                     user_id=user_id,
                     category=cat,
@@ -462,6 +487,42 @@ class InfinityDB:
                     (fact, confidence, source_atom_id, timestamp, user_id, category),
                 )
 
+    _SINGLE_VALUED = frozenset({"location", "role", "employer", "identity", "budget"})
+
+    # Question words that point at a fact category even when the stored fact shares no words
+    # with the question ("where do I live" -> "I moved to Madrid").
+    _CATEGORY_HINTS = {
+        "location": {"live", "lives", "living", "lived", "reside", "resides", "located", "based", "city", "address", "moved", "relocated"},
+        "employer": {"employer", "company", "employed", "work", "works", "working", "joined", "workplace"},
+        "role": {"role", "job", "title", "position", "profession", "occupation", "work", "works"},
+        "identity": {"name", "called"},
+        "budget": {"budget", "spend"},
+    }
+
+    def _auto_supersede(self, user_id: str, category: str, atom_id: str, fact: str, ts: float) -> None:
+        """Keep one current value per single-valued category, using event time.
+
+        A newer fact supersedes older ones (relation time = the newer fact's event time, so
+        recall(as_of=...) sees history correctly). An older fact arriving late is recorded as
+        already superseded by the newer one that exists. Identical text is treated as a repeat.
+        """
+        rows = self.conn.execute(
+            "SELECT id, fact, ts FROM l1_atoms WHERE user_id = ? AND category = ? AND id <> ?",
+            (user_id, category, atom_id),
+        ).fetchall()
+        for r in rows:
+            if r["fact"].strip().lower() == fact.strip().lower():
+                continue
+            if r["ts"] <= ts:
+                old, new, when = r["id"], atom_id, ts
+            else:
+                old, new, when = atom_id, r["id"], r["ts"]
+            self.conn.execute(
+                "INSERT OR IGNORE INTO l1_atom_relations (old_atom_id, new_atom_id, user_id, relation, created_at) "
+                "VALUES (?, ?, ?, 'supersedes', ?)",
+                (old, new, user_id, when),
+            )
+
     def supersede_fact(
         self, old_atom_id: str, new_atom_id: str, user_id: str
     ) -> str:
@@ -524,6 +585,8 @@ class InfinityDB:
         user_id: str | None = None,
         include_policies: bool = True,
         as_of: float | None = None,
+        now: float | None = None,
+        reinforce: bool = True,
     ) -> dict[str, Any]:
         """Hybrid memory recall combining BM25 keyword matching, causal links,
 
@@ -546,8 +609,13 @@ class InfinityDB:
             raise ValueError("as_of must be a finite Unix timestamp")
 
         start_time = time.perf_counter()
-        q_terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 1]
-        now = time.time()
+        _STOP = {"a", "an", "the", "is", "are", "was", "were", "be", "been", "of", "to", "in", "on", "at", "for",
+                 "and", "or", "does", "do", "did", "what", "which", "who", "whom", "where", "when", "how", "why",
+                 "my", "me", "i", "it", "its", "this", "that", "with", "as", "by", "from", "one"}
+        q_all = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 1]
+        q_terms = [t for t in q_all if t not in _STOP] or q_all
+        # Decay is measured against as_of when given, else an explicit ``now``, else wall-clock.
+        now = as_of if as_of is not None else (now if now is not None else time.time())
 
         # FTS5 narrows candidates before Python applies importance and time-decay.
         # Quote each token so user input cannot inject FTS operators.
@@ -574,8 +642,37 @@ class InfinityDB:
             if user_id:
                 sql += " AND a.user_id = ?"
                 params.append(user_id)
+            sql += " ORDER BY bm25(l1_atoms_fts) LIMIT 200"
             cur = self.conn.execute(sql, params)
             rows = cur.fetchall()
+
+            # Category routing: add the user's current facts of any category the question points at.
+            hinted = sorted(c for c, words in self._CATEGORY_HINTS.items() if words & set(q_terms))
+            cat_hits: set[str] = set()
+            if hinted:
+                marks = ",".join("?" for _ in hinted)
+                sql2 = f"""
+                    SELECT a.id, a.user_id, a.fact, a.category, a.source_id,
+                           a.importance, a.access_count, a.ts
+                    FROM l1_atoms a
+                    WHERE a.category IN ({marks})
+                      AND (? IS NULL OR a.ts <= ?)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM l1_atom_relations r
+                          WHERE r.old_atom_id = a.id
+                            AND (? IS NULL OR r.created_at <= ?)
+                      )
+                """
+                params2: list[Any] = [*hinted, as_of, as_of, as_of, as_of]
+                if user_id:
+                    sql2 += " AND a.user_id = ?"
+                    params2.append(user_id)
+                sql2 += " ORDER BY a.ts DESC LIMIT 50"
+                seen_ids = {r["id"] for r in rows}
+                for r in self.conn.execute(sql2, params2).fetchall():
+                    cat_hits.add(r["id"])
+                    if r["id"] not in seen_ids:
+                        rows.append(r)
 
             for row in rows:
                 fact = row["fact"]
@@ -584,6 +681,8 @@ class InfinityDB:
 
                 # BM25-style term frequency & exact phrase boost.
                 term_score = term_matches * 2.5
+                if term_matches == 0 and row["id"] in cat_hits:
+                    term_score = 2.5          # matched by category, not by words
                 if query.lower() in fact_lower:
                     term_score += 4.0
 
@@ -593,7 +692,7 @@ class InfinityDB:
                 retention_decay = math.exp(-delta_days / max(stability, 0.1))
                 total_score = (term_score + row["importance"] * 1.5) * retention_decay
 
-                if term_matches > 0:
+                if term_matches > 0 or row["id"] in cat_hits:
                     scored_results.append({
                         "id": row["id"],
                         "fact": fact,
@@ -602,16 +701,20 @@ class InfinityDB:
                         "score": round(total_score, 4),
                         "retention": round(retention_decay, 3),
                         "ts": row["ts"],
+                        "_raw": total_score,
                     })
 
 
         # Sort descending by composite score
-        scored_results.sort(key=lambda x: x["score"], reverse=True)
+        # Unrounded score first, then newest event time, so ties never favour stale facts.
+        scored_results.sort(key=lambda x: (x["_raw"], x["ts"]), reverse=True)
         top_k = scored_results[:n]
+        for item in top_k:
+            item.pop("_raw", None)
 
         # Reinforce only the memories actually returned to the caller.
         top_ids = [item["id"] for item in top_k]
-        if top_ids:
+        if top_ids and reinforce:
             id_placeholders = ",".join("?" for _ in top_ids)
             self.conn.execute(
                 f"UPDATE l1_atoms SET access_count = access_count + 1 WHERE id IN ({id_placeholders})",

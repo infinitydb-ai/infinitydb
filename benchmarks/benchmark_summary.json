@@ -5,6 +5,7 @@
   "recall_latency_p50_ms": 2.42,
   "recall_latency_p95_ms": 4.82,
   "extraction_cost_usd": 0.0,
-  "token_reduction_pct": 81.4,
-  "backend": "SQLite-WAL"
+  "token_reduction_pct": null,
+  "backend": "SQLite-WAL",
+  "_note": "Historical artifact. token_reduction_pct was an unmeasured marketing figure and has been removed. Regenerate measurements with benchmarks/reproducible.py."
 }

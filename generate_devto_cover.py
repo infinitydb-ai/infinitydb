@@ -35,8 +35,8 @@ draw.text((70, 235), "Tiered L0-L6 Neurosymbolic Architecture on SQLite WAL Mode
 
 # Metric pill badges at bottom
 metrics = [
-    ("RECALL", "0.75ms"),
-    ("TOKEN SAVINGS", "81.4%"),
+    ("RECALL", "SQLite FTS5"),
+    ("LLM CALLS TO EXTRACT", "0"),
     ("EXTRACTION COST", "$0"),
     ("AUDIT PROOFS", "SHA-256")
 ]
