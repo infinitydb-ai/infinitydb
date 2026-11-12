@@ -34,9 +34,9 @@
     "benchmark": "node benchmark.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "dependencies": {
-    "better-sqlite3": "^13.1.1"
+    "better-sqlite3": "^12.11.1"
   }
 }
