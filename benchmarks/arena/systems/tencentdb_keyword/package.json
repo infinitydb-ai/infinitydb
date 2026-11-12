@@ -1,0 +1,12 @@
+{
+  "name": "arena-tencentdb-keyword",
+  "private": true,
+  "type": "module",
+  "description": "Runs TencentDB Agent Memory's own FTS retrieval over LoCoMo turns, no LLM key required.",
+  "dependencies": {
+    "@tencentdb-agent-memory/memory-tencentdb": "1.0.3"
+  },
+  "devDependencies": {
+    "tsx": "4.20.6"
+  }
+}

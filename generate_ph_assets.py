@@ -93,9 +93,9 @@ draw_gal.text((80, 135), "Sub-Millisecond Neurosymbolic Long-Term Memory for AI 
 
 # 4 Metric Cards
 cards = [
-    ("RECALL LATENCY (p95)", "0.75 ms", "< 5.0ms target", (59, 130, 246)),
-    ("TOKEN COMPRESSION", "81.4 %", "Context overhead saved", (16, 185, 129)),
-    ("FACT ACCURACY", "89.7 %", "PersonaMem Benchmark", (139, 92, 246)),
+    ("RETRIEVAL", "FTS5", "Indexed local recall", (59, 130, 246)),
+    ("LLM CALLS TO EXTRACT", "0", "Deterministic local rules", (16, 185, 129)),
+    ("FACT HISTORY", "as_of", "Event-time supersession", (139, 92, 246)),
     ("EXTRACTION COST", "$0", "Deterministic local rules", (245, 158, 11)),
 ]
 

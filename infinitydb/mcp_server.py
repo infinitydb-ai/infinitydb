@@ -1,8 +1,19 @@
 """InfinityDB Model Context Protocol (MCP) Server.
 
-Enables Claude Desktop, Cursor, Windsurf, and LLM agents to seamlessly connect to
-InfinityDB long-term memory over standard JSON-RPC 2.0 stdio.
-Zero external dependencies required.
+Enables Claude Desktop, Claude Code, Cursor, Windsurf, and other MCP hosts to use
+InfinityDB as long-term memory over JSON-RPC 2.0 stdio.
+
+Zero external dependencies: the transport is stdin/stdout, the store is SQLite.
+
+Tools:
+    recall_memory   scoped recall (session / entity / point-in-time, token budget)
+    add_memory      ingest a conversation turn or note
+    get_persona     resolved preference profile for a user
+    correct_fact    mark one fact as superseded by another (bi-temporal correction)
+    forget          erase everything stored for a user
+    add_policy      governance rule surfaced during recall
+    verify_proof    check the SHA-256 provenance chain of a fact
+    stats           layer counts for the active database
 """
 
 from __future__ import annotations
@@ -15,7 +26,7 @@ from typing import Any, Dict
 from infinitydb.core.engine import InfinityDB
 
 SERVER_NAME = "infinitydb"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.3.0"
 
 DB_PATH = os.environ.get("INFINITYDB_PATH", "infinity_mcp.db")
 db = InfinityDB(DB_PATH)
@@ -23,95 +34,273 @@ db = InfinityDB(DB_PATH)
 TOOLS = [
     {
         "name": "recall_memory",
-        "description": "Recall long-term neurosymbolic memory, atomic facts, and causal relations for a given query and user.",
+        "description": (
+            "Recall long-term memory. Scope it with session_id (one conversation or "
+            "project) and/or entities (names, products) — scoped recall matches a "
+            "single-conversation store instead of competing with every other chat."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "The search query or contextual question to recall memories for."},
-                "user_id": {"type": "string", "description": "User or agent identifier (defaults to 'default').", "default": "default"},
+                "query": {"type": "string", "description": "What to recall."},
+                "user_id": {"type": "string", "default": "default"},
+                "session_id": {
+                    "type": "string",
+                    "description": "Restrict to one session, project, or conversation.",
+                },
+                "entities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Only recall memories mentioning every one of these.",
+                },
+                "as_of": {
+                    "type": "number",
+                    "description": "Unix time: answer as the store looked then (excludes later facts).",
+                },
+                "top_k": {"type": "integer", "default": 8},
+                "budget_tokens": {
+                    "type": "integer",
+                    "description": "Hard cap on returned words.",
+                },
             },
             "required": ["query"],
         },
     },
     {
         "name": "add_memory",
-        "description": "Ingest conversational interactions into InfinityDB. Automatically generates L0 logs, L1 atomic facts, and L2 causal graphs with sub-millisecond writes.",
+        "description": (
+            "Store a conversation turn, decision, or note. Facts are extracted "
+            "deterministically on write; no model call is made."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "The dialogue, interaction transcript, or statement to commit to long-term memory."},
-                "user_id": {"type": "string", "description": "User or agent identifier.", "default": "default"},
+                "content": {"type": "string"},
+                "user_id": {"type": "string", "default": "default"},
+                "session_id": {"type": "string", "description": "Conversation or project id."},
+                "timestamp": {"type": "number", "description": "Unix event time (default: now)."},
+                "importance": {"type": "number", "default": 0.9},
             },
             "required": ["content"],
         },
     },
     {
         "name": "get_persona",
-        "description": "Retrieve the dynamic persona and conflict-resolved preference profile of a user or agent.",
+        "description": "Resolved preference profile (identity, role, employer, preferences) for a user.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "user_id": {"type": "string", "description": "User or agent identifier.", "default": "default"},
+                "user_id": {"type": "string", "default": "default"},
+                "summary": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Return a one-paragraph profile instead of the key/value map.",
+                },
             },
             "required": ["user_id"],
         },
     },
     {
-        "name": "add_policy",
-        "description": "Add an enterprise governance rule, safety policy, or operational SOP that is strictly enforced during memory recall.",
+        "name": "correct_fact",
+        "description": (
+            "Mark a stored fact as superseded by a newer one. The old fact stays "
+            "readable at earlier as_of times; later reads no longer return it."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "rule": {"type": "string", "description": "The policy statement to enforce (e.g. 'Never disclose internal API keys')."},
-                "domain": {"type": "string", "description": "Policy category (security, privacy, compliance).", "default": "security"},
-                "priority": {"type": "number", "description": "Enforcement priority weighting.", "default": 1.0},
+                "old_atom_id": {"type": "string"},
+                "new_atom_id": {"type": "string"},
+                "user_id": {"type": "string", "default": "default"},
+            },
+            "required": ["old_atom_id", "new_atom_id"],
+        },
+    },
+    {
+        "name": "forget",
+        "description": "Erase all memory for one user. Returns per-layer deletion counts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string"},
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Must be true; guards against accidental erasure.",
+                },
+            },
+            "required": ["user_id", "confirm"],
+        },
+    },
+    {
+        "name": "add_policy",
+        "description": "Add a governance rule or SOP that recall surfaces to the agent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string"},
+                "domain": {"type": "string", "default": "security"},
+                "priority": {"type": "number", "default": 1.0},
             },
             "required": ["rule"],
         },
     },
     {
         "name": "verify_proof",
-        "description": "Verify the tamper-evident SHA-256 cryptographic proof chain of an atomic fact.",
+        "description": "Return the SHA-256 provenance record for an atomic fact.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"atom_id": {"type": "string"}},
+            "required": ["atom_id"],
+        },
+    },
+    {
+        "name": "entity_graph",
+        "description": (
+            "Follow typed relation edges out of an entity (works_at, lives_in, "
+            "studied_at, likes, dislikes). hops=2 also follows entities that "
+            "share an object, which is how two people in one memory connect."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "atom_id": {"type": "string", "description": "The atomic fact identifier to verify."},
+                "entity": {"type": "string"},
+                "user_id": {"type": "string", "default": "default"},
+                "hops": {"type": "integer", "minimum": 1, "maximum": 3, "default": 1},
+                "limit": {"type": "integer", "default": 50},
             },
-            "required": ["atom_id"],
+            "required": ["entity"],
         },
+    },
+    {
+        "name": "contradictions",
+        "description": (
+            "Audit trail of superseded facts: what was replaced, by what, and "
+            "when. Nothing is deleted, so as_of recall still sees the history."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "default": "default"},
+                "limit": {"type": "integer", "default": 20},
+            },
+        },
+    },
+    {
+        "name": "stats",
+        "description": "Counts per memory layer for the active database.",
+        "inputSchema": {"type": "object", "properties": {}},
     },
 ]
 
 
+def _text(payload: Any) -> Dict[str, Any]:
+    body = payload if isinstance(payload, str) else json.dumps(payload, indent=2)
+    return {"content": [{"type": "text", "text": body}]}
+
+
+def _render(results: list[dict[str, Any]]) -> str:
+    """One memory per line, with its event date and id, for an agent to cite."""
+    from datetime import datetime
+
+    lines = []
+    for item in results:
+        day = datetime.fromtimestamp(item["ts"]).strftime("%d %B %Y")
+        lines.append(f"[{day}] ({item['id']}) {item['fact']}")
+    return "\n".join(lines) if lines else "No matching memories."
+
+
 def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     if name == "recall_memory":
-        query = arguments.get("query", "")
+        result = db.recall(
+            str(arguments.get("query", "")),
+            n=int(arguments.get("top_k", 8)),
+            user_id=arguments.get("user_id", "default"),
+            as_of=arguments.get("as_of"),
+            reinforce=False,
+            session_id=arguments.get("session_id"),
+            entities=arguments.get("entities"),
+            budget_tokens=arguments.get("budget_tokens"),
+        )
+        return _text(
+            {
+                "memories": _render(result["results"]),
+                "count": len(result["results"]),
+                "policies": [p["rule"] for p in result.get("policies", [])],
+            }
+        )
+
+    if name == "add_memory":
+        ts = arguments.get("timestamp")
+        log_id = db.add(
+            str(arguments.get("content", "")),
+            user_id=arguments.get("user_id", "default"),
+            session_id=arguments.get("session_id"),
+            importance=float(arguments.get("importance", 0.9)),
+            ts=ts,
+        )
+        return _text({"status": "ok", "log_id": log_id})
+
+    if name == "get_persona":
         user_id = arguments.get("user_id", "default")
-        res = db.recall(query, user_id=user_id)
-        return {"content": [{"type": "text", "text": json.dumps(res, indent=2)}]}
+        if arguments.get("summary"):
+            return _text({"summary": db.persona_summary(user_id)})
+        return _text(db.get_persona(user_id=user_id))
 
-    elif name == "add_memory":
-        content = arguments.get("content", "")
-        user_id = arguments.get("user_id", "default")
-        log_id = db.add(content, user_id=user_id)
-        return {"content": [{"type": "text", "text": json.dumps({"status": "success", "log_id": log_id, "user_id": user_id})}]}
+    if name == "correct_fact":
+        relation = db.supersede_fact(
+            str(arguments["old_atom_id"]),
+            str(arguments["new_atom_id"]),
+            arguments.get("user_id", "default"),
+        )
+        return _text({"status": "ok", "relation": relation})
 
-    elif name == "get_persona":
-        user_id = arguments.get("user_id", "default")
-        persona = db.get_persona(user_id=user_id)
-        return {"content": [{"type": "text", "text": json.dumps(persona, indent=2)}]}
+    if name == "forget":
+        if arguments.get("confirm") is not True:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": "forget requires confirm: true"}],
+            }
+        return _text(db.delete_user(str(arguments["user_id"])))
 
-    elif name == "add_policy":
-        rule = arguments.get("rule", "")
-        domain = arguments.get("domain", "security")
-        priority = float(arguments.get("priority", 1.0))
-        pol_id = db.add_policy(rule, domain=domain, priority=priority)
-        return {"content": [{"type": "text", "text": json.dumps({"status": "success", "policy_id": pol_id, "rule": rule})}]}
+    if name == "add_policy":
+        policy_id = db.add_policy(
+            str(arguments.get("rule", "")),
+            domain=arguments.get("domain", "security"),
+            priority=float(arguments.get("priority", 1.0)),
+        )
+        return _text({"status": "ok", "policy_id": policy_id})
 
-    elif name == "verify_proof":
-        atom_id = arguments.get("atom_id", "")
-        proof = db.get_proof(atom_id)
-        return {"content": [{"type": "text", "text": json.dumps(proof, indent=2)}]}
+    if name == "verify_proof":
+        proof = db.get_proof(str(arguments.get("atom_id", "")))
+        if proof is None:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": "no proof record for that atom"}],
+            }
+        return _text(proof)
+
+    if name == "entity_graph":
+        paths = db.relations(
+            str(arguments.get("entity", "")),
+            user_id=arguments.get("user_id", "default"),
+            hops=int(arguments.get("hops", 1)),
+            limit=int(arguments.get("limit", 50)),
+        )
+        rendered = "\n".join(
+            f"hop {p['hop']} ({p['direction']}): {p['subject']} —{p['predicate']}→ {p['object']}"
+            for p in paths
+        )
+        return _text({"paths": rendered or "No typed relations.", "count": len(paths)})
+
+    if name == "contradictions":
+        conflicts = db.contradictions(
+            arguments.get("user_id", "default"),
+            limit=int(arguments.get("limit", 20)),
+        )
+        return _text({"contradictions": conflicts, "count": len(conflicts)})
+
+    if name == "stats":
+        return _text(db.stats())
 
     return {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {name}"}]}
 
@@ -138,44 +327,26 @@ def run_server() -> None:
                     "id": req_id,
                     "result": {
                         "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {},
-                        },
-                        "serverInfo": {
-                            "name": SERVER_NAME,
-                            "version": SERVER_VERSION,
-                        },
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                     },
                 }
-            elif method == "notifications/initialized":
+            elif method and method.startswith("notifications/"):
                 continue
             elif method == "tools/list":
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "tools": TOOLS,
-                    },
-                }
+                resp = {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}
             elif method == "tools/call":
-                tool_name = params.get("name", "")
-                arguments = params.get("arguments", {})
-                tool_res = handle_call_tool(tool_name, arguments)
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": tool_res,
-                }
+                tool_res = handle_call_tool(
+                    params.get("name", ""), params.get("arguments", {})
+                )
+                resp = {"jsonrpc": "2.0", "id": req_id, "result": tool_res}
             elif method == "ping":
                 resp = {"jsonrpc": "2.0", "id": req_id, "result": {}}
             else:
                 resp = {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method '{method}' not found",
-                    },
+                    "error": {"code": -32601, "message": f"Method '{method}' not found"},
                 }
 
             sys.stdout.write(json.dumps(resp) + "\n")
@@ -185,10 +356,7 @@ def run_server() -> None:
             err_resp = {
                 "jsonrpc": "2.0",
                 "id": None,
-                "error": {
-                    "code": -32603,
-                    "message": str(e),
-                },
+                "error": {"code": -32603, "message": str(e)},
             }
             sys.stdout.write(json.dumps(err_resp) + "\n")
             sys.stdout.flush()

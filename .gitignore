@@ -12,3 +12,11 @@ build/
 .npmrc
 *.tgz
 
+
+.arena/
+
+# LongMemEval / large benchmark data (downloaded, not committed)
+benchmarks/arena/data/
+benchmarks/arena/results/*.db
+benchmarks/arena/results/*.db-wal
+benchmarks/arena/results/*.db-shm

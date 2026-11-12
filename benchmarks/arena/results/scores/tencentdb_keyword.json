@@ -1,0 +1,46 @@
+{
+  "system": "tencentdb-agent-memory",
+  "version": "1.0.3",
+  "mode": "keyword (FTS5/BM25) \u2014 their documented recall.strategy=keyword branch",
+  "records": "one L1 record per dialogue turn, written through their own store API",
+  "provider_note": "L1 LLM extraction and the embedding/vector branch were NOT run: both need a key. This is their retriever, not their full pipeline.",
+  "n": 1977,
+  "evidence_recall@10": 0.5254,
+  "answer_in_context": null,
+  "answer_in_context_note": "not measured: no reader LLM was used, same as the InfinityDB rows",
+  "by_category": {
+    "adversarial": {
+      "recall": 0.6166,
+      "n": 446
+    },
+    "multi-hop": {
+      "recall": 0.1892,
+      "n": 281
+    },
+    "open-domain": {
+      "recall": 0.227,
+      "n": 89
+    },
+    "single-hop": {
+      "recall": 0.5931,
+      "n": 841
+    },
+    "temporal": {
+      "recall": 0.5982,
+      "n": 320
+    }
+  },
+  "by_conversation": {
+    "conv-26": 0.5319,
+    "conv-30": 0.5519,
+    "conv-41": 0.5472,
+    "conv-42": 0.5234,
+    "conv-43": 0.5513,
+    "conv-44": 0.5031,
+    "conv-47": 0.4557,
+    "conv-48": 0.5471,
+    "conv-49": 0.5582,
+    "conv-50": 0.4813
+  },
+  "harness": "benchmarks/arena/systems/tencentdb_keyword/"
+}

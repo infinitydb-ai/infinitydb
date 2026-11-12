@@ -34,20 +34,84 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 
 *   **Token-Aware Memory:** Stores raw multi-turn conversations and tool transcripts outside the model context. Actual token savings depend on the caller tokenizer and prompt construction.
 *   **Deterministic Fact Extraction:** L1 Atomic Facts are extracted with local rules and no LLM call. Extraction quality is limited to the implemented patterns; latency depends on workload and hardware.
-*   **Temporal Fact History:** Facts remain in their original provenance chain. Applications can explicitly mark a newer fact as superseding an older one and query memory as of a Unix timestamp; the engine does not guess semantic contradictions.
+*   **Temporal Fact History:** `add(..., ts=)` records when something happened. A newer single-valued fact (location, role, employer, identity, budget) automatically supersedes the older one, and `recall(..., as_of=ts)` returns what was current at that time. Multi-valued facts (preferences, relations) are never superseded automatically, and the engine does not infer contradictions between free-text facts; use `supersede_fact()` for those.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
 *   **Tenant-Scoped Guardrails (L4 Policies):** Combines global baseline policies with tenant-specific SOPs; a tenant's private policies are excluded from other tenants' recall.
-*   **Indexed Hybrid Retrieval:** SQLite FTS5 narrows keyword candidates; importance weighting and Ebbinghaus time-decay rank the retrieved facts. Latency depends on dataset, hardware, and workload.
+*   **Indexed Hybrid Retrieval:** SQLite FTS5 (porter-stemmed) narrows keyword candidates; strong terms from the best few hits are fed back into the query (light pseudo-relevance feedback), which recovers paraphrases such as "job" for "work"; importance weighting and Ebbinghaus time-decay rank the retrieved facts. A cross-encoder reranker can be plugged in through `recall(..., rerank=fn)` if you want the last few percent and can pay for it. Latency depends on dataset, hardware, and workload.
 
 ---
 
+## Measured results (v1.1.0)
+
+Reproduce with `python benchmarks/update_tracking.py` and `python benchmarks/reproducible.py`. Synthetic, single machine, not a leaderboard.
+
+| Check | v1.0.0 | v1.1.0 |
+|---|---|---|
+| Update tracking: current answer ranked first (300 users, 1-4 moves each, 3,000 distractor facts) | 27% | 100% |
+| Update tracking: outdated fact in top 3 | 75% | 0% |
+| `benchmarks/reproducible.py` recall p50 / p95 | 9.1 / 12.4 ms | 1.2 / 1.9 ms |
+| Recall p50, 30,000 facts, query with a rare term | 1,667 ms | 0.4 ms |
+
+Limits: the update-tracking test only uses facts the built-in rules can parse ("I live in X", "I moved to X"); free-text facts outside those patterns are stored but not auto-superseded. Queries made only of very common words still scan many rows (25 ms at 30,000 facts).
+
 ## Benchmark status
 
-**No independent leaderboard ranking is claimed yet.** The benchmark artifacts currently committed to this repository do not support the historical competitor-comparison numbers previously shown here. In particular, the checked-in run reports 0.0 PersonaMem accuracy for InfinityDB, a measured token saving of 63.2% (not 81.4%), and the 2,000-iteration stress artifact reports 8.238 ms p95 recall (not 4.2 ms).
+A reproducible head-to-head harness now runs **actual memory systems** on the public LoCoMo dataset, with pinned versions and per-question raw outputs: see [benchmarks/arena](benchmarks/arena/README.md). It replaces the earlier architecture emulators, which must not be read as product comparisons.
 
-The existing benchmark harness includes local architecture emulators; it does not execute the actual TencentDB, Mem0, Zep, or Letta products. Those emulator outputs must not be presented as direct product comparisons.
+Measured 2026-11-10 on one 8-vCPU CPU-only host, all 10 conversations, 1,986 questions, top-10 retrieval, no LLM at write or read time:
 
-Until a benchmark is independently reproducible against pinned implementations and datasets, treat performance figures as workload-specific observations—not guarantees or rankings. See [the benchmark integrity audit](docs/BENCHMARK_INTEGRITY_AUDIT.md) and [benchmark reproduction notes](benchmarks/README.md).
+| System | evidence recall@10 | answer in context | context tokens | ingest | search p50 |
+| --- | --- | --- | --- | --- | --- |
+| **InfinityDB** | **0.780** | **0.545** | 711 | **7.5 s** | **10.7 ms** |
+| **InfinityDB**, `dense=` (local MiniLM fusion) | 0.787 | 0.549 | **652** | 8.0 s | 29.0 ms |
+| **InfinityDB**, `budget_tokens=320` | 0.696 | 0.479 | 325 | 8.4 s | 10.8 ms |
+| mem0 2.2.1 OSS (`infer=False`) | 0.678 | 0.386 | **321** | 544.3 s | 152.1 ms |
+| TencentDB Agent Memory 1.0.3, keyword/FTS mode (no LLM) | 0.525 | — | — | — | — |
+| Free BM25 + dense hybrid, RRF-fused | 0.676 | 0.389 | **314** | 582.2 s | 151.9 ms |
+| InfinityDB, atom-only ablation | 0.498 | 0.355 | 329 | 7.9 s | 5.1 ms |
+
+The TencentDB Agent Memory row is retrieval-only on purpose. Their L1 extraction
+and their embedding branch both need a model key, so only their documented
+`recall.strategy=keyword` (FTS5/BM25) path could run; it was driven through their
+own `executeMemorySearch` over the same verbatim turns, and no reader was used,
+so answer-in-context, tokens and latency are left blank rather than estimated.
+Reproduce it with `benchmarks/arena/systems/tencentdb_keyword/`.
+
+The hybrid row is a deliberately strong "free stack" baseline: porter-stemmed BM25
+over the same turns plus `thenlper/gte-large` embeddings, fused with reciprocal
+rank fusion (k=60), all local. It does not beat mem0 here — fusing the two
+signals does not fix what a bag-of-words index and one embedding lose — and it
+costs mem0-class ingest time.
+
+What these numbers do and do not say:
+
+- InfinityDB retrieves more annotated evidence (+15.0% relative) and puts the gold answer in context considerably more often (+41% relative) than mem0's no-LLM mode, at ~72× faster ingestion and ~14× faster search — but with ~2.2× more context by default.
+- Prompt cost can be held constant: `recall(..., budget_tokens=N)` packs the best memories into a word budget. At mem0's ~320-word context, InfinityDB still leads on evidence recall (0.696 vs 0.678) and puts the gold answer in context 24% more often; it reaches mem0's answer-in-context rate at ~200 words.
+- These are retrieval proxies scored without a reader model, on one dataset, on one machine, with heuristics tuned on that same dataset. They are not a general leaderboard.
+- Zep/Graphiti and TencentDB were **not** run: both require LLM or cloud credentials this environment does not have. No comparison against them is claimed.
+- No independent third party has reproduced these results.
+
+Two further measurements, same host, same scoring code:
+
+- **Scoped recall under contamination.** Every row above gives each conversation
+  its own database, which is not how an agent runs. Pooling all ten conversations
+  into one store with unscoped recall drops evidence recall@10 from 0.780 to
+  **0.733**; the same store recalled with `session_id=<conversation>` returns
+  **0.780** — identical to ten separate databases, at 40 ms p50 across a 10×
+  larger corpus. Scoping computes corpus statistics inside the scope; without
+  that, it recovers only 68% of the loss.
+- **LongMemEval (`longmemeval_s`), the dataset MemPalace publishes against.**
+  Session-level **R@5 = 0.933** over a stratified 180-question sample
+  (30 per question type, answer hit if any returned memory comes from an
+  annotated answer session, ~54 sessions / ~550 turns per question, no reader
+  LLM). MemPalace reports 96.6% R@5 for the full 500; this is a 180-question
+  subsample, so treat it as close, not as a win. The weak type is
+  `single-session-preference` (0.667): preference questions want the L3 profile,
+  which recall does not yet merge in.
+
+The repository's own reproducible harness remains the regression tool for latency and correctness. See [the benchmark integrity audit](docs/BENCHMARK_INTEGRITY_AUDIT.md) and [benchmark reproduction notes](benchmarks/README.md).
+
+How the other memory engines are built — mem0, Graphiti (Zep), Letta, Memobase, Cognee — is documented from their shipped source in [the competitive teardown](docs/COMPETITIVE_TEARDOWN.md), together with what we adopted from them and the changes that were measured and rejected.
 
 ## Architecture: The L0-L6 Memory Pyramid
 
@@ -66,6 +130,18 @@ L6 PROOF CHAIN    -> Cryptographic SHA-256 provenance linking every atom back to
 The stored raw logs and extracted records are inspectable; extraction is rule-based and does not guarantee lossless semantic coverage.
 
 ---
+
+## Verify it yourself
+
+Every number in this README is reproducible offline, with no API key:
+
+```bash
+./scripts/verify.sh
+```
+
+That runs the test suite, an engine smoke test, the published LoCoMo baseline, and
+the competitor readiness check. The full claim inventory — what is measured, what
+is not, and the known gaps ranked — is in [docs/DILIGENCE.md](docs/DILIGENCE.md).
 
 ## Installation
 
@@ -277,13 +353,27 @@ const enrichedPrompt = await memory.enrichPrompt("Generate component architectur
 
 See `examples/vercel_ai_integration.js`.
 
-### Claude Desktop & Cursor (MCP)
-Model Context Protocol server over stdio. Works with any MCP host.
+### Claude Code, Cursor & any MCP host
+Model Context Protocol server over stdio, zero dependencies, ten tools:
+`recall_memory` (scoped by session, entity, point-in-time and token budget),
+`entity_graph` (typed relation traversal) and `contradictions` (supersession audit),
+`add_memory`, `get_persona`, `correct_fact`, `forget`, `add_policy`,
+`verify_proof`, `stats`.
 ```bash
 python -m infinitydb.mcp_server
 ```
 
-See `docs/MCP_SERVER.md` for Claude Desktop and Cursor configuration.
+Capture is the other half: MCP is pull (the agent has to decide to look), so
+`python -m infinitydb.capture --transcript <session.jsonl>` push-ingests an
+agent transcript incrementally — safe to run from a `Stop` hook after every
+turn, because a byte-offset state file means only new lines are read and
+nothing is stored twice.
+```json
+{"hooks": {"Stop": [{"hooks": [{"type": "command",
+  "command": "python -m infinitydb.capture --transcript \"$CLAUDE_TRANSCRIPT_PATH\""}]}]}}
+```
+
+See `docs/MCP_SERVER.md` for host configuration and hook setup.
 
 **Registry:** [NPM](https://www.npmjs.com/package/infinitydb) `infinitydb` | [PyPI](https://pypi.org/project/infinitydb-ai/) `infinitydb-ai` | [Smithery](https://smithery.ai/skills/diwakarsrd28/infinitydb) `diwakarsrd28/infinitydb` | [Hugging Face](https://huggingface.co/spaces/Diwakarsrd/infinitydb)
 
@@ -292,7 +382,10 @@ See `docs/MCP_SERVER.md` for Claude Desktop and Cursor configuration.
 ## Roadmap
 
 *   **v1.0 (Current):** Open-source L0-L6 Brain Engine, SQLite WAL mode, Python and Node.js SDKs, local dashboard, comprehensive benchmark suite.
-*   **v1.1 (Upcoming):** Direct Postgres + `pgvector` adapter for 100M+ memories, Redis caching tier, MCP server for Claude / Cursor.
+*   **With a key:** `python -m infinitydb.extraction --check` validates the extraction backend, then `add(..., extractor=openai_extractor())` (or `ollama_extractor()` for a free local model) turns turns into model-written facts. The hook is shipped and tested; the measured quality number is pending a key.
+*   **v1.3 (Current):** Typed relation edges written at ingest (`relations()`, `entity_graph`), deterministic contradiction detection with a supersession audit (`contradictions()`), model-backed extraction module (`openai_extractor` / `ollama_extractor`), persona compaction, ten-tool MCP server, fast replay probe.
+*   **v1.2:** Scoped recall (`session_id` / `entities`), caller-supplied extraction hook, eight-tool MCP server, incremental transcript capture, LongMemEval + scoped-recall probes.
+*   **Next:** Direct Postgres + `pgvector` adapter for very large stores, Redis caching tier, read-time graph expansion for multi-hop questions.
 *   **Cloud (Waitlist):** Hosted multi-tenant managed clusters with SSO, RBAC, and SOC2. See [waitlist/README.md](waitlist/README.md).
 
 ---

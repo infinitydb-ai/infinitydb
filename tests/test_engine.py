@@ -757,3 +757,197 @@ def test_file_backed_database_uses_full_synchronous_mode(tmp_path):
     assert reopened.recall("durable", user_id="durability")["results"]
     assert reopened.conn.execute("PRAGMA synchronous").fetchone()[0] == 2
     reopened.close()
+
+
+def test_turn_window_recall_joins_pronoun_only_followups():
+    """A follow-up turn is found through the turn it refers back to."""
+    db = InfinityDB()
+    t0 = 1_700_000_000.0
+    db.add("Caroline: I adopted a greyhound named Pepper.", user_id="window", ts=t0)
+    db.add("Melanie: That is a big commitment.", user_id="window", ts=t0 + 60)
+    db.add("Caroline: Yes, she needs two walks a day.", user_id="window", ts=t0 + 120)
+
+    assert db.stats()["l1_turn_windows"] == 3
+
+    windowed = db.recall("How often does Pepper need walks?", n=1, user_id="window")
+    chunk = windowed["results"][0]["fact"]
+    assert "Pepper" in chunk and "walks" in chunk
+
+    # The same question scored atom-by-atom cannot place the name and the
+    # pronoun-only follow-up in one memory.
+    atom_only = db.recall(
+        "How often does Pepper need walks?", n=1, user_id="window", turn_windows=False
+    )
+    assert not all(
+        token in atom_only["results"][0]["fact"] for token in ("Pepper", "walks")
+    )
+
+    with pytest.raises(TypeError, match="turn_windows must be a boolean"):
+        db.recall("walks", user_id="window", turn_windows=1)  # type: ignore[arg-type]
+
+    db.delete_user("window")
+    assert db.stats()["l1_turn_windows"] == 0
+
+
+def test_recall_budget_tokens_packs_ranked_memories_and_always_returns_one():
+    """A word budget trims context without dropping the best memory."""
+    db = InfinityDB()
+    t0 = 1_700_000_000.0
+    for i in range(6):
+        db.add(
+            f"Caroline: Garden project note {i} about the tomato beds and seeds.",
+            user_id="budget",
+            ts=t0 + i * 60,
+        )
+    full = db.recall("garden project tomato", n=6, user_id="budget", turn_windows=False)
+    capped = db.recall(
+        "garden project tomato", n=6, user_id="budget", turn_windows=False, budget_tokens=1
+    )
+
+    def words(result):
+        return sum(len(item["fact"].split()) for item in result["results"])
+
+    assert len(full["results"]) > 1
+    assert words(full) > words(capped)
+    # At least one memory is returned even when it exceeds the budget.
+    assert len(capped["results"]) == 1
+    assert capped["results"][0]["id"] == full["results"][0]["id"]
+
+    for bad in (0, -5, 2.5, True):
+        with pytest.raises((ValueError, TypeError), match="budget_tokens"):
+            db.recall("garden", user_id="budget", budget_tokens=bad)  # type: ignore[arg-type]
+
+
+def test_recall_validates_expansion_and_finds_paraphrased_vocabulary():
+    db = InfinityDB()
+    db.add(
+        "Caroline: I finally started the new role at the clinic on Monday.",
+        user_id="prf", ts=1_700_000_000.0,
+    )
+    db.add("Caroline: The tomatoes in the garden need water.", user_id="prf", ts=1_700_000_060.0)
+    db.add("Caroline: My sister visited the museum.", user_id="prf", ts=1_700_000_120.0)
+
+    strict = db.recall("job at the clinic", n=3, user_id="prf", expansion=0.0)
+    expanded = db.recall("job at the clinic", n=3, user_id="prf", expansion=0.2)
+    # Expansion reorders results (that is the point), but the only passage that
+    # mentions the clinic must stay in the returned context.
+    assert strict["results"] and expanded["results"]
+    assert any("clinic" in item["fact"] for item in expanded["results"])
+    assert any("clinic" in item["fact"] for item in strict["results"])
+
+    for bad in (True, "0.2"):
+        with pytest.raises(TypeError, match="expansion"):
+            db.recall("clinic", user_id="prf", expansion=bad)  # type: ignore[arg-type]
+    for bad in (-0.1, 1.5):
+        with pytest.raises(ValueError, match="expansion"):
+            db.recall("clinic", user_id="prf", expansion=bad)
+
+
+def test_recall_accepts_optional_reranker_plugin():
+    db = InfinityDB()
+    for i, text in enumerate([
+        "Alice: the garden needs water before noon.",
+        "Bob: the concert last night was far too loud.",
+        "Alice: I finally bought the red bicycle on Sunday.",
+    ]):
+        db.add(
+            text,
+            user_id="rr",
+            session_id=f"day-{i}",
+            ts=1_700_000_000.0 + i * 60,
+        )
+
+    query = "garden concert bicycle"
+    seen: list[str] = []
+
+    def prefer_bicycle(_query: str, passages: list[str]) -> list[float]:
+        seen.extend(passages)
+        return [1.0 if "bicycle" in p else 0.0 for p in passages]
+
+    plain = db.recall(query, n=3, user_id="rr", reinforce=False)
+    reranked = db.recall(query, n=1, user_id="rr", reinforce=False, rerank=prefer_bicycle)
+    assert plain["results"] and reranked["results"]
+    assert seen, "reranker must receive the assembled chunks"
+    assert "bicycle" in reranked["results"][0]["fact"]
+
+    with pytest.raises(TypeError, match="rerank"):
+        db.recall(query, user_id="rr", rerank="not-callable")  # type: ignore[arg-type]
+
+
+def test_recall_scope_limits_results_to_session_and_entity():
+    db = InfinityDB()
+    db.add(
+        "Alice: I moved to Lisbon and started a pottery class.",
+        user_id="scope",
+        session_id="trip-portugal",
+        ts=1_700_000_000.0,
+    )
+    db.add(
+        "Bob: I moved to Oslo and started a climbing club.",
+        user_id="scope",
+        session_id="trip-norway",
+        ts=1_700_000_100.0,
+    )
+
+    query = "moved and started"
+    unscoped = db.recall(query, n=5, user_id="scope", reinforce=False)
+    assert {r["fact"] for r in unscoped["results"]} >= {"Alice: I moved to Lisbon and started a pottery class."}
+
+    scoped = db.recall(
+        query, n=5, user_id="scope", session_id="trip-norway", reinforce=False
+    )
+    joined = " ".join(r["fact"] for r in scoped["results"])
+    assert "Oslo" in joined
+    assert "Lisbon" not in joined
+
+    by_entity = db.recall(query, n=5, user_id="scope", entities=["Lisbon"], reinforce=False)
+    assert "Lisbon" in " ".join(r["fact"] for r in by_entity["results"])
+    assert "Oslo" not in " ".join(r["fact"] for r in by_entity["results"])
+
+    with pytest.raises(ValueError, match="session_id"):
+        db.recall(query, user_id="scope", session_id="   ")
+    with pytest.raises(TypeError, match="entities"):
+        db.recall(query, user_id="scope", entities="Lisbon")  # type: ignore[arg-type]
+
+
+def test_add_accepts_caller_supplied_extractor():
+    db = InfinityDB()
+
+    def extractor(text: str) -> list[dict[str, object]]:
+        assert text.strip()
+        return [
+            {"fact": "Caroline works the night shift at the clinic.", "category": "fact"},
+            {"fact": "Caroline prefers decaf after 6pm.", "category": "preference", "importance": 0.8},
+        ]
+
+    db.add(
+        "Caroline: I clock in at the clinic at 9pm most nights.",
+        user_id="ex",
+        session_id="s1",
+        ts=1_700_000_000.0,
+        extractor=extractor,
+    )
+
+    hits = db.recall("night shift clinic", n=3, user_id="ex", reinforce=False)
+    assert "night shift" in " ".join(r["fact"] for r in hits["results"]).lower()
+
+    # Facts written by the caller's extractor keep their provenance record.
+    proof = db.conn.execute(
+        "SELECT count(*) FROM l6_proof WHERE raw_snippet LIKE '%night shift%'"
+    ).fetchone()[0]
+    assert proof >= 1
+
+    with pytest.raises(TypeError, match="extractor"):
+        db.add("Carol: hello there.", user_id="ex", extractor="not-callable")  # type: ignore[arg-type]
+
+    def broken(_text: str):
+        raise ValueError("provider is down")
+
+    with pytest.raises(RuntimeError, match="provider is down"):
+        db.add("Carol: hello again.", user_id="ex", extractor=broken)
+
+    def wrong_shape(_text: str):
+        return [42]
+
+    with pytest.raises(TypeError, match="extractor returned"):
+        db.add("Carol: one more.", user_id="ex", extractor=wrong_shape)

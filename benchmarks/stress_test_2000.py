@@ -167,7 +167,6 @@ def run_stress_test_2000() -> dict[str, Any]:
     print(f"    • L2 Causal Episodes:       {stats['l2_causal_episodes']}")
     print(f"    • L3 Dynamic Personas:      {stats['l3_personas']}")
     print(f"    • L6 Cryptographic Proofs:  {proofs_verified} / 2,000 verified ({proofs_verified / 2000 * 100:.1f}%)")
-    print(f"    • Context Token Saving:     81.4% (vs raw prompt injection)")
     print("=" * 84)
 
     results_data = {
