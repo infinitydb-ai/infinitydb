@@ -6,7 +6,7 @@
 
 <p align="center">
   InfinityDB is a high-performance, open-source agent memory engine.<br/>
-  Symbolic short-term memory + layered long-term memory. Zero external API dependencies. Runs locally on SQLite to Postgres.
+  Symbolic short-term memory + layered long-term memory. No API key and no network call at write or read time; the default path installs no runtime dependencies. Runs locally on SQLite or Postgres.
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 <p align="center">
   <b>Agents remember. Humans innovate.</b><br/>
-  LangChain | CrewAI | MCP Compatible<br/>
+  MCP server included · LangChain, CrewAI and LlamaIndex adapters in <code>examples/</code><br/>
   <a href="https://github.com/infinitydb-ai/infinitydb">github.com/infinitydb-ai/infinitydb</a>
 </p>
 
@@ -84,6 +84,8 @@ over the same turns plus `thenlper/gte-large` embeddings, fused with reciprocal
 rank fusion (k=60), all local. It does not beat mem0 here — fusing the two
 signals does not fix what a bag-of-words index and one embedding lose — and it
 costs mem0-class ingest time.
+
+The `dense=` row is not the default configuration: it needs an embedding model you supply yourself. The arena used `fastembed` with `sentence-transformers/all-MiniLM-L6-v2` — one ~90 MB download, no API key. The engine bundles no model and declares no runtime dependencies, so enabling it means installing an embedder yourself (`pip install fastembed`), running `db.index_dense(embedder, "minilm")`, then calling `recall(..., dense=(embedder, "minilm", 1.0))`.
 
 What these numbers do and do not say:
 
@@ -307,7 +309,7 @@ The legacy `benchmarks/benchmark.py` and `benchmarks/run_benchmark.py` commands 
 
 ## Integrations
 
-InfinityDB provides drop-in adapters for leading agent frameworks. No cloud required.
+Example adapters for leading agent frameworks live in [`examples/`](examples/) in this repository. They are **not** packaged in the PyPI wheel: `pip install infinitydb-ai` gives you the engine and the MCP server, so clone the repo if you want these adapters. No cloud required.
 
 ### LangChain
 Compatible with LangChain chains and agents.
@@ -383,7 +385,7 @@ See `docs/MCP_SERVER.md` for host configuration and hook setup.
 
 ## Roadmap
 
-*   **v1.4 (Current):** Dense fusion over turn windows (`recall(dense=True)`, opt-in), typed relation edges, scoped recall that holds up in a pooled multi-tenant store, typed supersession with `as_of` recall, opt-in relative-date normalisation, and the LoCoMo arena with per-question raw output. Install with `pip install -U infinitydb-ai` or `npm i infinitydb`.
+*   **v1.4 (Current):** Dense fusion over turn windows (`index_dense(...)` then `recall(..., dense=(embedder, model, weight))`, opt-in), typed relation edges, scoped recall that holds up in a pooled multi-tenant store, typed supersession with `as_of` recall, opt-in relative-date normalisation, and the LoCoMo arena with per-question raw output. Install with `pip install -U infinitydb-ai` or `npm i infinitydb`.
 *   **v1.3:** Typed relation edges written at ingest (`relations()`, `entity_graph`), deterministic contradiction detection with a supersession audit (`contradictions()`), model-backed extraction module (`openai_extractor` / `ollama_extractor`), persona compaction, ten-tool MCP server, fast replay probe.
 *   **v1.2:** Scoped recall (`session_id` / `entities`), caller-supplied extraction hook, eight-tool MCP server, incremental transcript capture, LongMemEval + scoped-recall probes.
 *   **v1.0:** Open-source L0-L6 Brain Engine, SQLite WAL mode, Python and Node.js SDKs, local dashboard, benchmark suite.
