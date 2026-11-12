@@ -41,9 +41,11 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 
 ---
 
-## Measured results (v1.1.0)
+## Regression checks (harness output, not a leaderboard)
 
-Reproduce with `python benchmarks/update_tracking.py` and `python benchmarks/reproducible.py`. Synthetic, single machine, not a leaderboard.
+Run offline with `python benchmarks/update_tracking.py` and `python benchmarks/reproducible.py`. Synthetic, single machine, no external system involved: these two scripts exist to catch regressions in update tracking and retrieval latency. They are **not** cross-system comparisons. Head-to-head results against other memory engines are the LoCoMo table in the next section.
+
+The columns below are the harness baseline recorded at v1.1.0; current output is checked by `./scripts/verify.sh`.
 
 | Check | v1.0.0 | v1.1.0 |
 |---|---|---|
