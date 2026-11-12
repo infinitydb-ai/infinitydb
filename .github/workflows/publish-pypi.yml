@@ -9,6 +9,9 @@ on:
 jobs:
   publish-pypi:
     runs-on: ubuntu-latest
+    # Must match the "Environment" field of the PyPI trusted publisher
+    # (pypi.org -> Your projects -> infinitydb-ai -> Publishing).
+    environment: pypi
     permissions:
       contents: read
       id-token: write

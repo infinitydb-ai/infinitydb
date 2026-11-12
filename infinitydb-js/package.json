@@ -1,6 +1,6 @@
 {
   "name": "infinitydb",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "description": "InfinityDB - High-performance agent memory engine. Remember Everything. Forget Nothing That Matters.",
   "main": "index.js",
   "types": "index.d.ts",
