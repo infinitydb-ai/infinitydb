@@ -17,7 +17,7 @@
   <a href="https://smithery.ai/skills/diwakarsrd28/infinitydb"><img src="https://img.shields.io/badge/Smithery-Skill-orange" alt="Smithery Skill"/></a>
   <a href="https://huggingface.co/spaces/Diwakarsrd/infinitydb"><img src="https://img.shields.io/badge/HuggingFace-Live_Demo-yellow" alt="Hugging Face Demo"/></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/node-%3E%3D18.0-green" alt="Node"/>
+  <img src="https://img.shields.io/badge/node-%3E%3D22.0-green" alt="Node"/>
 </p>
 
 <p align="center">

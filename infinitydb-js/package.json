@@ -33,7 +33,10 @@
     "test": "node test.js && node benchmark.test.js",
     "benchmark": "node benchmark.js"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
-    "better-sqlite3": "^11.10.0"
+    "better-sqlite3": "^13.1.1"
   }
 }
