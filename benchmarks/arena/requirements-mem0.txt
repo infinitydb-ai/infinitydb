@@ -1,0 +1,12 @@
+# Pinned competitor environment for the LoCoMo memory arena.
+#
+# mem0 runs in its own virtualenv so its dependency tree cannot affect
+# InfinityDB (which is dependency-free) and so the exact versions used in a
+# published run are recorded. Install with:
+#
+#   python3 -m venv .arena/venvs/mem0
+#   .arena/venvs/mem0/bin/pip install -r benchmarks/arena/requirements-mem0.txt
+mem0ai==2.2.1
+fastembed==0.9.1
+qdrant-client==1.20.0
+onnxruntime==1.31.1

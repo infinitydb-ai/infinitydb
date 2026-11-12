@@ -1,0 +1,5 @@
+# Free, offline hybrid retrieval baseline (BM25 + dense rank fusion).
+# No API key and no LLM are used; embeddings run locally through FastEmbed.
+fastembed==0.9.1
+numpy==2.5.4
+onnxruntime==1.31.1

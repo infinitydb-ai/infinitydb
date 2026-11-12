@@ -1,0 +1,57 @@
+{
+  "system": "mem0",
+  "conv": "conv-47",
+  "questions": 190,
+  "answerable_questions": 150,
+  "ingest_seconds": 55.081,
+  "qa_f1": 0.0,
+  "gold_in_answer": 0.0,
+  "answer_in_context": 0.4,
+  "evidence_recall@k": 0.6911,
+  "adversarial_refusal_rate": 0.0,
+  "latency_ms": {
+    "p50": 151.79,
+    "p95": 193.18
+  },
+  "context_tokens_median": 300,
+  "errors": 0,
+  "by_category": {
+    "adversarial": {
+      "n": 40,
+      "f1": 0.0,
+      "gold_in_answer": 0.0,
+      "answer_in_context": 0.0,
+      "evidence_recall@k": 0.6
+    },
+    "multi-hop": {
+      "n": 20,
+      "f1": 0.0,
+      "gold_in_answer": 0.0,
+      "answer_in_context": 0.15,
+      "evidence_recall@k": 0.3583
+    },
+    "open-domain": {
+      "n": 13,
+      "f1": 0.0,
+      "gold_in_answer": 0.0,
+      "answer_in_context": 0.0769,
+      "evidence_recall@k": 0.4615
+    },
+    "single-hop": {
+      "n": 83,
+      "f1": 0.0,
+      "gold_in_answer": 0.0,
+      "answer_in_context": 0.6747,
+      "evidence_recall@k": 0.7892
+    },
+    "temporal": {
+      "n": 34,
+      "f1": 0.0,
+      "gold_in_answer": 0.0,
+      "answer_in_context": 0.0,
+      "evidence_recall@k": 0.7353
+    }
+  },
+  "reader_model": null,
+  "sampled_questions": 0
+}
