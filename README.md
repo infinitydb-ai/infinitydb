@@ -90,7 +90,7 @@ What these numbers do and do not say:
 - InfinityDB retrieves more annotated evidence (+15.0% relative) and puts the gold answer in context considerably more often (+41% relative) than mem0's no-LLM mode, at ~72× faster ingestion and ~14× faster search — but with ~2.2× more context by default.
 - Prompt cost can be held constant: `recall(..., budget_tokens=N)` packs the best memories into a word budget. At mem0's ~320-word context, InfinityDB still leads on evidence recall (0.696 vs 0.678) and puts the gold answer in context 24% more often; it reaches mem0's answer-in-context rate at ~200 words.
 - These are retrieval proxies scored without a reader model, on one dataset, on one machine, with heuristics tuned on that same dataset. They are not a general leaderboard.
-- Zep/Graphiti and TencentDB were **not** run: both require LLM or cloud credentials this environment does not have. No comparison against them is claimed.
+- **Zep/Graphiti** was not run at all: it requires a graph database and model credentials this environment does not have, and three local attempts failed in ways documented in `benchmarks/arena/README.md`. **TencentDB** appears only in its documented keyword/FTS mode (row above); their LLM extraction and embedding paths need a model key and were not run. No comparison against either system's full pipeline is claimed.
 - No independent third party has reproduced these results.
 
 Two further measurements, same host, same scoring code:
@@ -383,10 +383,11 @@ See `docs/MCP_SERVER.md` for host configuration and hook setup.
 
 ## Roadmap
 
-*   **v1.0 (Current):** Open-source L0-L6 Brain Engine, SQLite WAL mode, Python and Node.js SDKs, local dashboard, comprehensive benchmark suite.
-*   **With a key:** `python -m infinitydb.extraction --check` validates the extraction backend, then `add(..., extractor=openai_extractor())` (or `ollama_extractor()` for a free local model) turns turns into model-written facts. The hook is shipped and tested; the measured quality number is pending a key.
-*   **v1.3 (Current):** Typed relation edges written at ingest (`relations()`, `entity_graph`), deterministic contradiction detection with a supersession audit (`contradictions()`), model-backed extraction module (`openai_extractor` / `ollama_extractor`), persona compaction, ten-tool MCP server, fast replay probe.
+*   **v1.4 (Current):** Dense fusion over turn windows (`recall(dense=True)`, opt-in), typed relation edges, scoped recall that holds up in a pooled multi-tenant store, typed supersession with `as_of` recall, opt-in relative-date normalisation, and the LoCoMo arena with per-question raw output. Install with `pip install -U infinitydb-ai` or `npm i infinitydb`.
+*   **v1.3:** Typed relation edges written at ingest (`relations()`, `entity_graph`), deterministic contradiction detection with a supersession audit (`contradictions()`), model-backed extraction module (`openai_extractor` / `ollama_extractor`), persona compaction, ten-tool MCP server, fast replay probe.
 *   **v1.2:** Scoped recall (`session_id` / `entities`), caller-supplied extraction hook, eight-tool MCP server, incremental transcript capture, LongMemEval + scoped-recall probes.
+*   **v1.0:** Open-source L0-L6 Brain Engine, SQLite WAL mode, Python and Node.js SDKs, local dashboard, benchmark suite.
+*   **With a key:** `python -m infinitydb.extraction --check` validates the extraction backend, then `add(..., extractor=openai_extractor())` (or `ollama_extractor()` for a free local model) turns turns into model-written facts. The hook is shipped and tested; the measured quality number is pending a key.
 *   **Next:** Direct Postgres + `pgvector` adapter for very large stores, Redis caching tier, read-time graph expansion for multi-hop questions.
 *   **Cloud (Waitlist):** Hosted multi-tenant managed clusters with SSO, RBAC, and SOC2. See [waitlist/README.md](waitlist/README.md).
 
