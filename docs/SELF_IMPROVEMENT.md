@@ -68,13 +68,55 @@ an upper bound and the second is what a real caller can supply:
   agent's response, no gold answer used. This is what a deployment can produce.
 
 Fit `learned_boost`, `min_support` and the term-prior cap on the fit half, then
-report held-out recall. **Gate 1:** held-out `evidence_recall@10` must improve
-by ≥0.01 absolute over 0.8101, with no category down by more than 0.005. Oracle
-improvement alone does not clear the gate; heuristic labels must also improve.
+report held-out recall.
 
-**Expected outcome, stated in advance:** the honest prior is that this moves
-little, because the lexical ranking is already strong and feedback mostly
-re-orders near-ties. A null result is a publishable paragraph, not a failure.
+**Gate 1 (as originally written, and wrong):** held-out `evidence_recall@10`
+must improve by ≥0.01 absolute. Running the experiment exposed the flaw: a
+re-ranker acting on a fixed candidate list **cannot change recall@10 at all**, by
+construction — it is the same ten memories in a different order. Both halves
+measured @10 identically, exactly as the set argument predicts. The gate was
+corrected after seeing the data, which is stated here rather than quietly
+edited: the metric a re-ranker can move is `recall@1` and `recall@3`.
+
+**Corrected gate 1:** held-out `recall@1` or `recall@3` improves, with no metric
+down; oracle labels alone do not clear it.
+
+### Result, measured 2026-11-13 — **gate failed, negative result**
+
+`benchmarks/arena/feedback_probe.py`, `infinitydb` rows, hyperparameters chosen
+on the fit half only.
+
+| split | labels | fit | recall@1 | recall@3 | recall@10 |
+|---|---|---|---|---|---|
+| by conversation | oracle | 0.6075 | **0.5971** (−0.0104) | **0.7373** (−0.0187) | 0.8546 (=) |
+| by conversation | answer | 0.6075 | 0.6075 (=) | 0.7560 (=) | 0.8546 (=) |
+| within conversation | oracle | 0.6930 | **0.6604** (−0.0326) | **0.8346** (−0.0075) | 0.9198 (=) |
+| within conversation | answer | 0.6930 | 0.6930 (=) | 0.8434 (+0.0013) | 0.9198 (=) |
+
+Recall@10 is identical in every row, confirming the set-invariance argument.
+These are subset numbers: questions that carry annotated evidence, split by
+conversation or by position, so they are **not** comparable to the published
+0.8101 overall figure.
+
+The learned prior made the fit half look better each time and then degraded
+held-out performance — textbook overfitting with a clear mechanism: the term
+prior memorises conversation-specific vocabulary. In one conversation's
+questions the names and places dominate the statistics, and those terms are
+useless in another conversation. Oracle labels hurt more than answer labels
+because a memory that contains evidence is not necessarily the memory a ranker
+should put first, so the labels are both noisy and strongly correlated with the
+current ranking.
+
+**Decision:** `learned_boost` stays opt-in and is not used anywhere in the
+default path or in any published number. Phase 2 (the learned bridge selector)
+remains the only change with a plausible path past the multi-hop 0.4939 number.
+
+**What would be tried next, if anyone continues this:** replace the pointwise
+prior with a learned pairwise ranker over features that already exist (BM25
+score, recency, category agreement, entity overlap, graph adjacency), trained on
+list-level feedback rather than per-memory labels, and evaluated with this exact
+protocol. A pointwise term prior is the weakest possible instance of the idea;
+its failure does not close the idea, but it does rule out shipping it.
 
 ## Phase 2 — a learned bridge selector for multi-hop
 
