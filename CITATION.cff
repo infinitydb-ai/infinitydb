@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this benchmark or quote its numbers, cite it as below."
+title: "LoCoMo Memory Arena: a reproducible retrieval benchmark for agent memory systems"
+type: software
+version: 1.4.1
+date-released: "2026-11-12"
+license: Apache-2.0
+repository-code: "https://github.com/infinitydb-ai/infinitydb"
+url: "https://github.com/infinitydb-ai/infinitydb/tree/main/benchmarks/arena"
+abstract: >-
+  A head-to-head harness that runs real agent-memory systems on the public LoCoMo
+  long-conversation dataset with the same turns, questions, top_k and scoring
+  code, and reports retrieval metrics that need no language model. Every result
+  is tied to a dataset SHA-256, pinned system versions and the raw per-question
+  rows, so a number can be recomputed from the committed artifacts with
+  `arena.py verify`.
+keywords:
+  - agent memory
+  - retrieval benchmark
+  - LoCoMo
+  - long-context memory
+  - reproducibility
+authors:
+  - name: "InfinityDB contributors"
+    url: "https://github.com/infinitydb-ai"
+references:
+  - type: dataset
+    title: "LoCoMo: Evaluating Very Long-Term Conversational Memory of LLM Agents"
+    authors:
+      - name: "Maharana, Adyasha"
+      - name: "Lee, Dong-Ho"
+      - name: "Tulyakov, Sergey"
+      - name: "Bansal, Mohit"
+      - name: "Barbieri, Francesco"
+      - name: "Fang, Yuwei"
+    repository: "https://github.com/snap-research/locomo"

@@ -241,6 +241,21 @@ class InfinityDB:
                 INSERT INTO l1_atoms_fts(rowid, fact) VALUES (new.rowid, new.fact);
             END;
 
+            -- Caller feedback on recall results. One row per judgement, kept
+            -- separate from the atoms so learning can be added, removed or
+            -- re-derived without touching memory content. `label` is +1 for
+            -- "this was the memory I needed" and -1 for "this was irrelevant".
+            CREATE TABLE IF NOT EXISTS recall_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                query TEXT NOT NULL,
+                query_stem TEXT NOT NULL,
+                atom_id TEXT NOT NULL,
+                label REAL NOT NULL,
+                ts REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_feedback_user ON recall_feedback(user_id, query_stem);
+
             CREATE TABLE IF NOT EXISTS infinitydb_schema_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -441,6 +456,43 @@ class InfinityDB:
         if len(token) > 4 and token.endswith("ed"):
             return token[:-2]
         return token
+
+    @classmethod
+    def _fts_match_terms(cls, terms: list[str]) -> list[str]:
+        """Build FTS5 query atoms that tolerate inflection mismatches.
+
+        The atom index is tokenised with `unicode61` and no stemmer, so a query
+        for "work" does not match a stored "works at the hospital" — the exact
+        failure a caller hits when asking a natural question. The turn-window
+        index is porter-stemmed, but atoms are not, so the match string has to
+        carry the variants itself. Prefix atoms (``"work"*``) cover the stored
+        inflections, and the stemmed form is added for irregular plural and
+        gerund pairs that a prefix cannot bridge. Precision is not lost: the
+        Python scorer still ranks on exact stemmed overlap.
+        """
+        atoms: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            if not term:
+                continue
+            variants = [term]
+            stem = cls._stem(term)
+            if stem != term:
+                variants.append(stem)
+            for variant in variants:
+                escaped = variant.replace('"', '""')
+                exact = f'"{escaped}"'
+                if exact not in seen:
+                    seen.add(exact)
+                    atoms.append(exact)
+                # Prefix matching only for terms long enough to stay selective;
+                # three-letter prefixes such as "art" match far too much.
+                if len(variant) >= 4:
+                    prefix = f'"{escaped}"*'
+                    if prefix not in seen:
+                        seen.add(prefix)
+                        atoms.append(prefix)
+        return atoms
 
     # -------------------------------------------------------------------------
     # Legacy Key-Value Compatibility (Passes existing tests)
@@ -657,6 +709,16 @@ class InfinityDB:
             (r"(?i:I hate|I dislike|I avoid|never use)\s+([^.,\n]+)", "dislike", 0.88),
             (r"(?i:my budget is|budget of|budget:\s*)\s*([$\u20ac\u00a3\u00a5]?[0-9,]+(?:\s*[kKmMbB])?)", "budget", 0.94),
             (r"(?i:I live in|I am living in|I['\u2019]m living in|I['\u2019]m based in|based in|located in|I moved to|I['\u2019]ve moved to|I relocated to)\s+([^.,\n]+)", "location", 0.85),
+            # Third-person phrasing about the person the store is about ("User relocated
+            # to Berlin"). Without these, the same fact stated as "I moved to Lisbon" and
+            # "User is based in Munich" landed in different categories, so the
+            # single-valued rules never saw a conflict and no contradiction was recorded.
+            # The subject is required and limited to "user" on purpose: bare "moved to"
+            # would swallow "the team moved to a new office" and supersede a real home.
+            # "based in" / "located in" are already covered above without a subject.
+            (r"(?i:(?:the )?user (?:has |had )?(?:moved|relocated|settled|resettled) (?:to|in)|(?:the )?user (?:now )?(?:lives|resides|lived|resided) in|(?:the )?user is (?:now )?living in)\s+([^.,\n]+)", "location", 0.82),
+            (r"(?i:(?:the )?user (?:works|worked|is working) (?:at|for)|(?:the )?user (?:has )?joined)\s+([^.,\n]+)", "employer", 0.84),
+            (r"(?i:(?:the )?user's (?:role|job|title|position) is)\s+([^.,\n]+)", "role", 0.86),
             (r"(?i:our goal is|aiming to|target is|deadline is)\s+([^.,\n]+)", "goal", 0.91),
             (r"(?i:must comply with|required to|constraint:\s*)\s+([^.,\n]+)", "constraint", 0.95),
             (r"(?i:my (?:sister|brother|mother|father|mom|dad|wife|husband|partner|daughter|son|friend|colleague|boss|manager))\s+(?i:lives in|works (?:at|for)|moved to|is based in)\s+([^.,\n]+)", "relation", 0.80),
@@ -1055,6 +1117,126 @@ class InfinityDB:
             else:
                 self._record_supersession(user_id, atom_id, row["atom_id"], row["ts"])
 
+    # ------------------------------------------------------------------
+    # Feedback substrate: what a caller knows and the engine cannot
+    # ------------------------------------------------------------------
+    def record_feedback(
+        self,
+        query: str,
+        atom_id: str,
+        user_id: str = "default",
+        relevant: bool = True,
+        ts: float | None = None,
+    ) -> int:
+        """Record whether a recalled atom actually answered the question.
+
+        An agent knows something the engine does not: after it used (or ignored)
+        a memory, the outcome is observable. Rows are append-only and never
+        modify the atom, so a mistaken label is offset by later ones and the
+        whole signal can be dropped without touching memory content.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must not be empty")
+        if not isinstance(atom_id, str) or not atom_id.strip():
+            raise ValueError("atom_id must not be empty")
+        stems = " ".join(sorted({self._stem(t) for t in re.findall(r"\w+", query.lower()) if len(t) > 1}))
+        with self.conn:
+            cur = self.conn.execute(
+                """INSERT INTO recall_feedback (user_id, query, query_stem, atom_id, label, ts)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, query, stems, atom_id, 1.0 if relevant else -1.0,
+                 time.time() if ts is None else ts),
+            )
+        return int(cur.lastrowid or 0)
+
+    def feedback_summary(self, user_id: str | None = None) -> dict[str, Any]:
+        """Counts for the feedback collected so far, so the signal is inspectable."""
+        where, params = ("WHERE user_id = ?", (user_id,)) if user_id else ("", ())
+        row = self.conn.execute(
+            f"""SELECT count(*) AS events,
+                       coalesce(sum(CASE WHEN label > 0 THEN 1 ELSE 0 END), 0) AS relevant,
+                       coalesce(sum(CASE WHEN label < 0 THEN 1 ELSE 0 END), 0) AS irrelevant,
+                       count(DISTINCT query_stem) AS queries
+                FROM recall_feedback {where}""",
+            params,
+        ).fetchone()
+        events = int(row["events"] or 0)
+        relevant = int(row["relevant"] or 0)
+        return {
+            "events": events,
+            "relevant": relevant,
+            "irrelevant": int(row["irrelevant"] or 0),
+            "queries": int(row["queries"] or 0),
+            "precision": round(relevant / events, 4) if events else 0.0,
+        }
+
+    def learned_term_weights(
+        self,
+        user_id: str | None = None,
+        min_support: int = 2,
+        max_terms: int = 256,
+    ) -> dict[str, float]:
+        """Terms that correlate with memories the caller accepted.
+
+        Deliberately simple and inspectable: each stemmed term scores its net
+        votes across the atoms marked relevant (+1) or irrelevant (-0.5, so a
+        rejection takes two acceptances to cancel), needs ``min_support`` net
+        votes to count at all, is normalised to [0, 1] and capped to
+        ``max_terms``. This is a lexical prior learned from outcomes, not a
+        model: you can read the whole thing with one query.
+        """
+        where, params = ("WHERE f.user_id = ?", (user_id,)) if user_id else ("", ())
+        rows = self.conn.execute(
+            f"""SELECT f.label, a.fact FROM recall_feedback f
+                JOIN l1_atoms a ON a.id = f.atom_id {where}""",
+            params,
+        ).fetchall()
+        votes: dict[str, float] = {}
+        for row in rows:
+            weight = 1.0 if row["label"] > 0 else -0.5
+            for term in {self._stem(t) for t in re.findall(r"\w+", row["fact"].lower()) if len(t) > 2}:
+                votes[term] = votes.get(term, 0.0) + weight
+        signal = {t: v for t, v in votes.items() if v >= min_support}
+        if not signal:
+            return {}
+        top = sorted(signal.items(), key=lambda kv: (-kv[1], kv[0]))[:max_terms]
+        ceiling = max(v for _, v in top)
+        return {term: round(value / ceiling, 4) for term, value in top}
+
+    def learned_atom_weights(
+        self,
+        user_id: str | None = None,
+        min_support: float = 1.0,
+    ) -> dict[str, float]:
+        """Per-memory weights from net feedback, normalised to [0, 1].
+
+        The counterpart to ``learned_term_weights``: a term prior cannot tell
+        two memories apart when both contain the query's words, but a caller
+        saying "this one answered it" can. Net votes are summed and a memory
+        needs ``min_support`` of them before it is trusted.
+        """
+        where, params = ("WHERE user_id = ?", (user_id,)) if user_id else ("", ())
+        rows = self.conn.execute(
+            f"""SELECT atom_id, sum(label) AS net FROM recall_feedback {where}
+                GROUP BY atom_id""",
+            params,
+        ).fetchall()
+        signal = {r["atom_id"]: float(r["net"]) for r in rows
+                  if r["net"] is not None and float(r["net"]) >= min_support}
+        if not signal:
+            return {}
+        ceiling = max(abs(v) for v in signal.values()) or 1.0
+        return {atom: round(value / ceiling, 4) for atom, value in signal.items()}
+
+    def clear_feedback(self, user_id: str | None = None) -> int:
+        """Drop recorded feedback, keeping every memory intact."""
+        if user_id:
+            cur = self.conn.execute("DELETE FROM recall_feedback WHERE user_id = ?", (user_id,))
+        else:
+            cur = self.conn.execute("DELETE FROM recall_feedback")
+        self.conn.commit()
+        return int(cur.rowcount or 0)
+
     _SINGLE_VALUED = frozenset({"location", "role", "employer", "identity", "budget"})
 
     # Question words that point at a fact category even when the stored fact shares no words
@@ -1168,9 +1350,7 @@ class InfinityDB:
         dialogue turns; prose and tool-log memories are handled by
         ``_recall_atoms``.
         """
-        match_query = " OR ".join(
-            '"' + term.replace('"', '""') + '"' for term in q_terms
-        )
+        match_query = " OR ".join(self._fts_match_terms(q_terms))
         # Corpus statistics are computed *inside the scope*. A scoped query that
         # still divides by the global document count ranks as if the whole store
         # competed for the slot, which is exactly the contamination scoping is
@@ -1473,8 +1653,16 @@ class InfinityDB:
         now: float,
         session_id: str | None = None,
         entity_stems: list[set[str]] | None = None,
+        learned: dict[str, float] | None = None,
+        learned_atoms: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
-        """Atom-level BM25 recall, used for prose input and legacy stores."""
+        """Atom-level BM25 recall, used for prose input and legacy stores.
+
+        ``learned`` maps stemmed terms to a prior derived from caller feedback
+        (see ``learned_term_weights``); a match adds a bounded bonus to the
+        term score, so feedback reorders candidates but cannot rescue a fact
+        that shares no content term with the query.
+        """
 
         def in_scope(fact: str) -> bool:
             if not entity_stems:
@@ -1489,9 +1677,7 @@ class InfinityDB:
         scored_results = []
         atom_ids_accessed = []
         if q_terms:
-            match_query = " OR ".join(
-                '"' + term.replace('"', '""') + '"' for term in q_terms
-            )
+            match_query = " OR ".join(self._fts_match_terms(q_terms))
             sql = """
                 SELECT a.id, a.user_id, a.fact, a.category, a.source_id,
                        a.importance, a.access_count, a.ts
@@ -1563,6 +1749,11 @@ class InfinityDB:
                 fact = row["fact"]
                 fact_lower = fact.lower()
                 tokens = Counter(re.findall(r"\w+", fact_lower))
+                # Stemmed counts, so a query token and a stored inflection of the
+                # same word score as the same term ("working" against "works").
+                stems = Counter()
+                for token, count in tokens.items():
+                    stems[self._stem(token)] += count
                 doc_len = max(1, sum(tokens.values()))
 
                 # Real IDF-weighted BM25: terms that occur in almost every memory
@@ -1570,17 +1761,35 @@ class InfinityDB:
                 # no weight, so content words decide the ranking.
                 term_score = 0.0
                 for term, term_idf in idf.items():
+                    term_stem = self._stem(term)
                     tf = tokens.get(term, 0)
                     if tf == 0:
+                        tf = stems.get(term_stem, 0)
+                    if tf == 0:
+                        # Prefix-shaped fallback on the stem, so "deploying" still
+                        # reaches a stored "deployment" the stemmer did not cut.
                         tf = sum(
                             count for token, count in tokens.items()
-                            if len(token) > 3 and term in token
+                            if len(term_stem) > 3 and term_stem in token
                         )
                     if tf == 0:
                         continue
                     term_score += term_idf * (tf * (k1 + 1.0)) / (
                         tf + k1 * (1.0 - b + b * doc_len / avg_tokens)
                     )
+                if learned_atoms:
+                    atom_weight = learned_atoms.get(row["id"])
+                    if atom_weight:
+                        term_score += atom_weight
+                if learned:
+                    prior = sum(
+                        weight for term, weight in learned.items()
+                        if stems.get(term)
+                    )
+                    if prior:
+                        # Bounded, so a well-liked word cannot outrank a fact
+                        # that actually answers the question.
+                        term_score += min(prior, 3.0)
                 if term_score == 0.0 and row["id"] in cat_hits:
                     term_score = 1.0          # matched by category, not by words
                 if query.lower() in fact_lower:
@@ -1646,6 +1855,7 @@ class InfinityDB:
         dense: Any = None,
         dense_model: str = "default",
         dense_weight: float = 1.0,
+        learned_boost: float = 0.0,
     ) -> dict[str, Any]:
         """Hybrid memory recall combining BM25 keyword matching, causal links,
 
@@ -1746,6 +1956,16 @@ class InfinityDB:
                  "my", "me", "i", "it", "its", "this", "that", "with", "as", "by", "from", "one"}
         q_all = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 1]
         q_terms = [t for t in q_all if t not in _STOP] or q_all
+        # Prior learned from caller feedback (record_feedback). Opt-in: it is
+        # derived from labels supplied by whoever calls recall, so it can never
+        # be part of the default path or of a benchmark number.
+        learned = None
+        learned_atoms = None
+        if learned_boost > 0 and user_id:
+            learned = {term: weight * learned_boost
+                       for term, weight in self.learned_term_weights(user_id=user_id).items()}
+            learned_atoms = {atom: weight * learned_boost
+                             for atom, weight in self.learned_atom_weights(user_id=user_id).items()}
         # Decay is measured against as_of when given, else an explicit ``now``, else wall-clock.
         now = as_of if as_of is not None else (now if now is not None else time.time())
 
@@ -1769,7 +1989,8 @@ class InfinityDB:
             )
         if not top_k:
             top_k = self._recall_atoms(
-                query, q_terms, n, user_id, as_of, now, session_id, entity_stems
+                query, q_terms, n, user_id, as_of, now, session_id, entity_stems,
+                learned, learned_atoms,
             )
         elif len(top_k) < n:
             # Merged turn chunks can leave slots unused. Fill them with prose,
@@ -1777,7 +1998,8 @@ class InfinityDB:
             # a returned chunk, so a mixed store never loses whole modalities.
             seen = "\n".join(item["fact"] for item in top_k).lower()
             for item in self._recall_atoms(
-                query, q_terms, n, user_id, as_of, now, session_id, entity_stems
+                query, q_terms, n, user_id, as_of, now, session_id, entity_stems,
+                learned, learned_atoms,
             ):
                 if item["fact"].lower() in seen:
                     continue
