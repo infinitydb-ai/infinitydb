@@ -1,0 +1,52 @@
+name: LongMemEval-S competitor benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      systems:
+        description: "Comma-separated systems: infinitydb,mem0,hybrid"
+        required: true
+        default: "infinitydb,mem0,hybrid"
+        type: string
+      limit:
+        description: "Questions per system (10 for pilot; 0 for all 500)"
+        required: true
+        default: "10"
+        type: string
+      top_k:
+        description: "Retrieved sessions per question"
+        required: true
+        default: "5"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: benchmark-arena-v2-windows
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run LongMemEval-S retrieval benchmark
+        shell: pwsh
+        run: |
+          $systems = "\${{ inputs.systems }}".Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          $limit = [int]"\${{ inputs.limit }}"
+          $topK = [int]"\${{ inputs.top_k }}"
+          if ($limit -lt 0 -or $limit -gt 500) { throw "limit must be 0..500" }
+          if ($topK -lt 1 -or $topK -gt 50) { throw "top_k must be 1..50" }
+          .\benchmarks\arena\run-longmemeval.ps1 -Systems $systems -Limit $limit -TopK $topK -DownloadDataset -InstallDependencies
+      - name: Upload raw results and comparison summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: longmemeval-arena-results
+          path: benchmarks/arena/results/longmemeval/
+          if-no-files-found: warn
+          retention-days: 30
