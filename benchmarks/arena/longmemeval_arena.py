@@ -144,6 +144,8 @@ def run_system(
             retrieved_sessions = resolve_session_ids(retrieved, line_map)
             answerable = bool(entry.answer_session_ids) and not entry.question_id.endswith("_abs")
             hit = bool(set(retrieved_sessions) & set(entry.answer_session_ids))
+            overlap = set(retrieved_sessions) & set(entry.answer_session_ids)
+            coverage = (len(overlap) / len(entry.answer_session_ids)) if answerable else None
             row = {
                 "type": "result",
                 "question_id": entry.question_id,
@@ -152,7 +154,8 @@ def run_system(
                 "dataset_sha256": dataset_hash,
                 "top_k": top_k,
                 "answerable": answerable,
-                "recall_at_k": (1.0 if hit else 0.0) if answerable else None,
+                "answer_session_hit_at_k": (1.0 if hit else 0.0) if answerable else None,
+                "answer_session_coverage_at_k": coverage,
                 "hit_any_all_questions": hit,
                 "abstention_empty_retrieval": (
                     not retrieved if not answerable else None
@@ -194,8 +197,12 @@ def run_system(
         "top_k": top_k,
         "questions_completed": len(rows),
         "answerable_questions": len(answerable_rows),
-        "session_recall_at_k_answerable": (
-            statistics.fmean(row["recall_at_k"] for row in answerable_rows)
+        "answer_session_hit_rate_at_k": (
+            statistics.fmean(row["answer_session_hit_at_k"] for row in answerable_rows)
+            if answerable_rows else None
+        ),
+        "answer_session_coverage_at_k": (
+            statistics.fmean(row["answer_session_coverage_at_k"] for row in answerable_rows)
             if answerable_rows else None
         ),
         "hit_any_rate_all_questions": (
@@ -232,9 +239,15 @@ def run_system(
             name: {
                 "n": len(group),
                 "answerable_n": sum(1 for row in group if row["answerable"]),
-                "session_recall_at_k_answerable": (
+                "answer_session_hit_rate_at_k": (
                     statistics.fmean(
-                        row["recall_at_k"] for row in group if row["answerable"]
+                        row["answer_session_hit_at_k"] for row in group if row["answerable"]
+                    )
+                    if any(row["answerable"] for row in group) else None
+                ),
+                "answer_session_coverage_at_k": (
+                    statistics.fmean(
+                        row["answer_session_coverage_at_k"] for row in group if row["answerable"]
                     )
                     if any(row["answerable"] for row in group) else None
                 ),
@@ -296,7 +309,8 @@ def main() -> None:
         "dataset_questions": len(entries),
         "systems": summaries,
         "metric_note": (
-            "Retrieval-only. Session recall is computed over answerable questions; "
+            "Retrieval-only. Answer-session hit rate and fraction of all annotated "
+            "answer sessions retrieved are computed over answerable questions; "
             "abstention questions are reported separately. No reader LLM is used."
         ),
     }
