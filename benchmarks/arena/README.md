@@ -272,25 +272,29 @@ The Windows runner performs the following without Bash or WSL:
 2. Compiles the arena Python modules and runs the selected real adapters over
    all ten LoCoMo conversations. Completed JSONL files are reused unless
    `-Force` is supplied.
-3. Scores retrieval with the existing scorer. Reader-model evaluation is off
+3. Runs TencentDB Agent Memory 1.0.3 through its actual Node FTS keyword path
+   (Node.js >=22), then invokes its separate evidence scorer. This is explicitly
+   keyword-only; no LLM extraction or vector branch is claimed.
+4. Scores the Python-worker systems with the existing scorer. Reader-model evaluation is off
    by default; enable it only when Ollama and the configured model are ready.
-4. Runs the existing pooled-vs-isolated scoped-recall probe and a separate
+5. Runs the existing pooled-vs-isolated scoped-recall probe and a separate
    synthetic InfinityDB scale test (100K writes by default). The synthetic
    result is **not** a competitor score.
-5. Runs the full LongMemEval probe if
+6. Runs the full LongMemEval probe if
    `benchmarks/arena/data/longmemeval_s.json` is present. The 278 MB dataset
    is not committed; without it the runner records that this probe was skipped.
-6. Writes a Windows run manifest under `benchmarks/arena/results/scores/`
+7. Writes a Windows run manifest under `benchmarks/arena/results/scores/`
    containing the dataset hash, OS, Python version, selected systems and probe
    status. Raw per-question JSONL remains under `results/<system>/`.
 
 The no-credential default compares InfinityDB, mem0 OSS in `infer=False`
-mode, and the local BM25 + FastEmbed hybrid control. These are the systems
-currently supported by the shared Python worker. TencentDB Agent Memory's
-keyword-mode result remains a separately measured Node harness; its full
-extraction pipeline needs a model endpoint. Graphiti is open source but its
-normal pipeline needs a graph backend and an LLM; it is not silently emulated
-or included in the no-credential leaderboard. See
+mode, the local BM25 + FastEmbed hybrid control, and TencentDB Agent Memory
+in its real FTS keyword-only mode. TencentDB runs through its separate pinned
+Node/TypeScript harness and is scored separately because it does not emit the
+Python worker JSONL schema. Its full extraction pipeline still needs a model
+endpoint. Graphiti is open source but its normal pipeline needs a graph backend
+and an LLM; it is not silently emulated or included in the no-credential
+leaderboard. See
 [the competitor playbook](../../docs/COMPETITOR_BENCHMARK_PLAYBOOK.md).
 
 For machines with 8 GB RAM, keep the default 100K synthetic workload initially.
