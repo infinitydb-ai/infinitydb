@@ -442,6 +442,43 @@ class InfinityDB:
             return token[:-2]
         return token
 
+    @classmethod
+    def _fts_match_terms(cls, terms: list[str]) -> list[str]:
+        """Build FTS5 query atoms that tolerate inflection mismatches.
+
+        The atom index is tokenised with `unicode61` and no stemmer, so a query
+        for "work" does not match a stored "works at the hospital" — the exact
+        failure a caller hits when asking a natural question. The turn-window
+        index is porter-stemmed, but atoms are not, so the match string has to
+        carry the variants itself. Prefix atoms (``"work"*``) cover the stored
+        inflections, and the stemmed form is added for irregular plural and
+        gerund pairs that a prefix cannot bridge. Precision is not lost: the
+        Python scorer still ranks on exact stemmed overlap.
+        """
+        atoms: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            if not term:
+                continue
+            variants = [term]
+            stem = cls._stem(term)
+            if stem != term:
+                variants.append(stem)
+            for variant in variants:
+                escaped = variant.replace('"', '""')
+                exact = f'"{escaped}"'
+                if exact not in seen:
+                    seen.add(exact)
+                    atoms.append(exact)
+                # Prefix matching only for terms long enough to stay selective;
+                # three-letter prefixes such as "art" match far too much.
+                if len(variant) >= 4:
+                    prefix = f'"{escaped}"*'
+                    if prefix not in seen:
+                        seen.add(prefix)
+                        atoms.append(prefix)
+        return atoms
+
     # -------------------------------------------------------------------------
     # Legacy Key-Value Compatibility (Passes existing tests)
     # -------------------------------------------------------------------------
@@ -1168,9 +1205,7 @@ class InfinityDB:
         dialogue turns; prose and tool-log memories are handled by
         ``_recall_atoms``.
         """
-        match_query = " OR ".join(
-            '"' + term.replace('"', '""') + '"' for term in q_terms
-        )
+        match_query = " OR ".join(self._fts_match_terms(q_terms))
         # Corpus statistics are computed *inside the scope*. A scoped query that
         # still divides by the global document count ranks as if the whole store
         # competed for the slot, which is exactly the contamination scoping is
@@ -1489,9 +1524,7 @@ class InfinityDB:
         scored_results = []
         atom_ids_accessed = []
         if q_terms:
-            match_query = " OR ".join(
-                '"' + term.replace('"', '""') + '"' for term in q_terms
-            )
+            match_query = " OR ".join(self._fts_match_terms(q_terms))
             sql = """
                 SELECT a.id, a.user_id, a.fact, a.category, a.source_id,
                        a.importance, a.access_count, a.ts
@@ -1563,6 +1596,11 @@ class InfinityDB:
                 fact = row["fact"]
                 fact_lower = fact.lower()
                 tokens = Counter(re.findall(r"\w+", fact_lower))
+                # Stemmed counts, so a query token and a stored inflection of the
+                # same word score as the same term ("working" against "works").
+                stems = Counter()
+                for token, count in tokens.items():
+                    stems[self._stem(token)] += count
                 doc_len = max(1, sum(tokens.values()))
 
                 # Real IDF-weighted BM25: terms that occur in almost every memory
@@ -1570,11 +1608,16 @@ class InfinityDB:
                 # no weight, so content words decide the ranking.
                 term_score = 0.0
                 for term, term_idf in idf.items():
+                    term_stem = self._stem(term)
                     tf = tokens.get(term, 0)
                     if tf == 0:
+                        tf = stems.get(term_stem, 0)
+                    if tf == 0:
+                        # Prefix-shaped fallback on the stem, so "deploying" still
+                        # reaches a stored "deployment" the stemmer did not cut.
                         tf = sum(
                             count for token, count in tokens.items()
-                            if len(token) > 3 and term in token
+                            if len(term_stem) > 3 and term_stem in token
                         )
                     if tf == 0:
                         continue
