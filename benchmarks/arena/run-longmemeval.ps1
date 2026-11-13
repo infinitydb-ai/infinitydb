@@ -51,7 +51,7 @@ if ($NeedsEmbeddingEnv) {
         Invoke-Native -File $Mem0Python -Arguments @("-m", "pip", "install", "-r", "benchmarks/arena/requirements-mem0.txt")
         Invoke-Native -File $Mem0Python -Arguments @("-m", "pip", "install", "-r", "benchmarks/arena/requirements-hybrid.txt")
     } else {
-        $Check = & $Mem0Python -c "import mem0, fastembed, qdrant_client, onnxruntime, numpy" 2>&1
+        $Check = & $Mem0Python -c "import mem0, fastembed, qdrant_client, onnxruntime, numpy, ollama" 2>&1
         if ($LASTEXITCODE -ne 0) { throw "Embedding dependencies missing. Re-run with -InstallDependencies. Details: $Check" }
     }
 }
