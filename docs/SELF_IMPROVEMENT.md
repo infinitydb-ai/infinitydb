@@ -118,6 +118,46 @@ list-level feedback rather than per-memory labels, and evaluated with this exact
 protocol. A pointwise term prior is the weakest possible instance of the idea;
 its failure does not close the idea, but it does rule out shipping it.
 
+### Phase 1b — pairwise ranker, measured 2026-11-13 — **positive but not gate-clearing**
+
+`benchmarks/arena/pairwise_probe.py`: a perceptron over eight interpretable
+features (bias, own rank, question/memory stem overlap, question-type
+agreement for dates, places and names, recency within the conversation, length),
+trained on candidate **lists** rather than per-memory labels, same splits and
+label schemes as Phase 1, three folds.
+
+Held-out change versus the existing ranking:
+
+| fold | labels | recall@1 | recall@3 | recall@10 |
+|---|---|---|---|---|
+| conversations A→B | oracle | +0.0218 | +0.0135 | 0 |
+| conversations A→B | answer | 0.0000 | +0.0145 | 0 |
+| conversations B→A | oracle | +0.0286 | +0.0188 | 0 |
+| conversations B→A | answer | +0.0069 | +0.0188 | 0 |
+| within conversation | oracle | +0.0263 | +0.0050 | 0 |
+| within conversation | answer | −0.0025 | +0.0138 | 0 |
+
+**Verdict: the corrected gate is not cleared, though the direction is
+consistent.** `recall@3` improves in all six configurations under both label
+schemes; `recall@1` is positive in five and −0.0025 in the within-conversation
+answer-label run, which fails the "no metric down" clause. The effect is small,
+stable in sign, and bounded: **recall@10 cannot move** because this re-ranks a
+fixed candidate list.
+
+Two limits keep this out of the engine:
+
+1. The labels still need gold data. A deployable version needs a reader or a
+   user thumb, so the measured gain is an upper bound on what feedback could buy.
+2. Most of the learned weight lands on lexical overlap and the candidate's own
+   rank — the perceptron is largely rediscovering what the BM25 step already
+   does, which is why the gain is a point or two rather than ten.
+
+The honest reading: there is roughly **1.4–1.9 points of recall@3 headroom** in
+re-ranking these candidates with cheap features, and none at all at k=10. That is
+worth knowing and not worth shipping on its own. The next step is not more
+features; it is a deployable label source, so the training signal matches what a
+deployment can actually observe.
+
 ## Phase 2 — a learned bridge selector for multi-hop
 
 **Question:** can multi-hop move past 0.4939?
