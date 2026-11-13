@@ -32,13 +32,18 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            "benchmarks/arena/run.ps1",
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List
-            exit 1
+          foreach ($file in @("benchmarks/arena/run.ps1", "benchmarks/arena/run-longmemeval.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              Write-Host "Parse errors in $file"
+              $errors | Format-List
+              exit 1
+            }
           }
-          Write-Host "PowerShell syntax passed."
+          Write-Host "PowerShell syntax passed for both runners."
