@@ -26,10 +26,32 @@ from typing import Any, Dict
 from infinitydb.core.engine import InfinityDB
 
 SERVER_NAME = "infinitydb"
-SERVER_VERSION = "1.3.0"
+# Must match pyproject.toml: MCP hosts display this, and a stale value makes an
+# installed server look older than the package it came from.
+SERVER_VERSION = "1.4.1"
 
-DB_PATH = os.environ.get("INFINITYDB_PATH", "infinity_mcp.db")
-db = InfinityDB(DB_PATH)
+def default_db_path() -> str:
+    """Absolute by default, in the same place `infinitydb.capture` writes.
+
+    A relative default resolved against the host's working directory, which for
+    GUI hosts is somewhere the user never chose — and it meant auto-captured
+    turns landed in a different store than the one MCP read. Both now default to
+    ``~/.infinitydb/memory.db``; ``INFINITYDB_PATH`` still overrides, and a
+    relative path there is honoured deliberately, not by accident.
+    """
+    return os.environ.get("INFINITYDB_PATH") or os.path.expanduser("~/.infinitydb/memory.db")
+
+
+def open_db(path: str) -> InfinityDB:
+    if path != ":memory:":
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    return InfinityDB(path)
+
+
+DB_PATH = default_db_path()
+db = open_db(DB_PATH)
 
 TOOLS = [
     {
