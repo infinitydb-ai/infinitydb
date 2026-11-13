@@ -195,5 +195,37 @@ class PredicateBridge:
         return chosen
 
 
-__all__ = ["AllBridge", "Bridge", "BridgeSelector", "NullBridge", "PredicateBridge",
-           "SubjectBridge"]
+class BroadPredicateBridge(PredicateBridge):
+    """`PredicateBridge` with the aspect vocabulary widened for multi-hop phrasing.
+
+    The strict gate fires on 7.8% of multi-hop questions because LoCoMo asks
+    "What did Caroline research?" rather than "Where does Caroline study?".
+    Widening only the *aspect* words — never the subject matching — keeps the
+    property that gave the strict gate its precision: an edge is used only when
+    the question asks for that kind of fact. The question this measures is
+    whether vocabulary, not selectivity, was the limit.
+    """
+
+    name = "broad"
+
+    _ASPECTS: dict[str, set[str]] = {
+        "lives_in": {"where", "live", "lives", "living", "lived", "reside", "resides",
+                     "based", "moved", "move", "moves", "moving", "relocated",
+                     "city", "town", "home", "address", "country", "originally",
+                     "grew", "birthplace", "apartment", "neighborhood", "neighbourhood"},
+        "works_at": {"work", "works", "working", "worked", "job", "jobs", "employer",
+                     "company", "employed", "workplace", "joined", "career", "profession",
+                     "occupation", "position", "role", "industry", "internship", "business",
+                     "manager", "colleague", "team", "office"},
+        "studied_at": {"study", "studied", "studies", "studying", "school", "college",
+                       "university", "degree", "graduated", "class", "research", "researched",
+                       "major", "field", "course", "learning", "training", "thesis",
+                       "education"},
+        "likes": {"like", "likes", "loved", "love", "loves", "enjoy", "enjoys", "prefer",
+                  "favourite", "favorite", "hobby", "hobbies", "activity", "activities",
+                  "interest", "interests", "passion", "destination", "trip", "travel"},
+    }
+
+
+__all__ = ["AllBridge", "Bridge", "BridgeSelector", "BroadPredicateBridge", "NullBridge",
+           "PredicateBridge", "SubjectBridge"]

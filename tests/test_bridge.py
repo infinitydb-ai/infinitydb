@@ -5,7 +5,8 @@ These are unit tests of the selectors only. The multi-hop measurement lives in
 baseline with the null selector before any comparison is trusted.
 """
 
-from infinitydb.bridge import AllBridge, Bridge, NullBridge, PredicateBridge, SubjectBridge
+from infinitydb.bridge import (AllBridge, Bridge, BroadPredicateBridge, NullBridge,
+                               PredicateBridge, SubjectBridge)
 
 
 def _edges():
@@ -40,6 +41,20 @@ def test_predicate_bridge_accepts_nothing_without_an_aspect():
 
 def test_predicate_bridge_rejects_an_object_the_question_already_mentions():
     assert PredicateBridge().select("Is Caroline based in Bristol?", _edges()) == []
+
+
+def test_broad_gate_fires_where_the_strict_gate_cannot():
+    question = "What did Caroline research?"
+    assert PredicateBridge().select(question, _edges()) == []
+    assert BroadPredicateBridge().select(question, _edges())
+
+
+def test_broad_gate_still_refuses_questions_with_no_aspect():
+    assert BroadPredicateBridge().select("Is Caroline taller than Melanie?", _edges()) == []
+
+
+def test_broad_gate_still_refuses_an_object_the_question_names():
+    assert BroadPredicateBridge().select("Is Caroline's hobby pottery?", _edges()) == []
 
 
 def test_subject_bridge_fires_on_any_predicate_for_a_named_person():

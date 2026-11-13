@@ -312,6 +312,30 @@ Still open, and untested here: expanding aspect vocabulary ("research",
 "career", "activities") rather than expanding subject matching, which would keep
 aspect precision while raising coverage. That is the cheapest next experiment.
 
+### Phase 2d — wider aspect vocabulary, measured 2026-11-13 — **best arm so far, gate still missed**
+
+`BroadPredicateBridge` keeps the strict gate's structure (an edge is used only
+when the question asks for that kind of fact) but widens the aspect words:
+`research`, `career`, `activities`, `hobby`, `neighbourhood`, `thesis` and so on.
+The narrow gate is left untouched so every earlier row stays reproducible.
+
+| selector | coverage | overall | delta | fired-subset delta |
+|---|---|---|---|---|
+| predicate, cap 2 (2b) | 22 (7.8%) | 0.4984 | +0.0045 | +0.0568 |
+| broad, cap 2 | 49 (17.4%) | 0.4982 | +0.0043 | +0.0245 |
+| **broad, cap 3** | **49 (17.4%)** | **0.5000** | **+0.0061** | **+0.0347** |
+
+Coverage more than doubled and the per-question effect roughly halved. The new
+questions do benefit (+0.0347 where the gate fires), so **precision held in sign
+but not in size**: the original gate was, in hindsight, selecting unusually easy
+questions rather than generalising.
+
+The extrapolation that matters: applying +0.0347 to every multi-hop question
+would give ≈0.529 — **still short of the 0.55 gate**. Full coverage at the
+current effect size does not clear it, so the next step must raise the effect per
+question, not only the number of questions. That is the learned selector's real
+job, and it is why spending inference on it is now justified rather than assumed.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.
