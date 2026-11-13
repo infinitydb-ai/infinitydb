@@ -6,6 +6,10 @@ param(
     [string]$Mode = "full",
     [ValidateRange(0, 100000)]
     [int]$MaxQuestions = 0,
+    [ValidateRange(1000, 10000000)]
+    [int]$StressIterations = 100000,
+    [switch]$SkipLongMemEval,
+    [switch]$SkipScopedProbe,
     [switch]$WithReader,
     [switch]$InstallDependencies,
     [switch]$Force
@@ -52,6 +56,7 @@ Write-Host "Dataset:    $Dataset"
 Write-Host "SHA-256:    $DatasetHash"
 Write-Host "Mode:       $Mode"
 Write-Host "Systems:    $($SelectedSystems -join ', ')"
+Write-Host "Stress:     $StressIterations synthetic InfinityDB writes"
 Write-Host ""
 
 if ($Mode -eq "smoke") {
@@ -99,6 +104,25 @@ if (-not $WithReader) { $ScoreArgs += "--no-reader" }
 else { Write-Host "Reader evaluation requested. Ensure Ollama is running and ARENA_READER_MODEL is pulled." -ForegroundColor Yellow }
 Invoke-Native -File $BasePython -Arguments $ScoreArgs
 
+# Separate, explicitly labelled InfinityDB-only scale test. It is not a
+# competitor result and must never be merged into the LoCoMo leaderboard.
+$StressOutput = "benchmarks/arena/results/stress-$StressIterations.json"
+Invoke-Native -File $BasePython -Arguments @("benchmarks/reproducible.py", "--iterations", "$StressIterations", "--output", $StressOutput)
+
+$ScopedOutput = "benchmarks/arena/results/scores/scoped_probe.json"
+if (-not $SkipScopedProbe) {
+    Invoke-Native -File $BasePython -Arguments @("benchmarks/arena/scoped_probe.py", "--out", $ScopedOutput)
+}
+
+$LongMemEvalPath = Join-Path $PSScriptRoot "data\longmemeval_s.json"
+$LongMemEvalStatus = "skipped: dataset not present"
+if (-not $SkipLongMemEval -and (Test-Path $LongMemEvalPath)) {
+    Invoke-Native -File $BasePython -Arguments @("benchmarks/arena/longmemeval_probe.py", "--path", $LongMemEvalPath, "--system", "infinitydb", "--top-k", "5")
+    $LongMemEvalStatus = "completed or resumed; inspect results/longmemeval/"
+} elseif ($SkipLongMemEval) {
+    $LongMemEvalStatus = "skipped by flag"
+}
+
 $Manifest = [ordered]@{
     benchmark = "InfinityDB Benchmark Arena v2"
     started_at = $RunStamp
@@ -116,6 +140,10 @@ $Manifest = [ordered]@{
     max_questions_per_conversation = $MaxQuestions
     reader_enabled = [bool]$WithReader
     force_rerun = [bool]$Force
+    stress_iterations = $StressIterations
+    stress_result = $StressOutput
+    scoped_probe_result = if ($SkipScopedProbe) { "skipped by flag" } else { $ScopedOutput }
+    longmemeval = $LongMemEvalStatus
 }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $RunManifest) | Out-Null
 $Manifest | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 $RunManifest
