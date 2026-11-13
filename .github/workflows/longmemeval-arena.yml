@@ -1,6 +1,12 @@
 name: LongMemEval-S competitor benchmark
 
 on:
+  push:
+    branches: [benchmark-arena-v2-windows]
+    paths:
+      - "benchmarks/arena/longmemeval_arena.py"
+      - "benchmarks/arena/run-longmemeval.ps1"
+      - ".github/workflows/longmemeval-arena.yml"
   workflow_dispatch:
     inputs:
       systems:
@@ -36,9 +42,9 @@ jobs:
       - name: Run LongMemEval-S retrieval benchmark
         shell: pwsh
         run: |
-          $systems = "${{ inputs.systems }}".Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-          $limit = [int]"${{ inputs.limit }}"
-          $topK = [int]"${{ inputs.top_k }}"
+          $systems = "${{ inputs.systems || 'infinitydb,mem0,hybrid' }}".Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          $limit = [int]"${{ inputs.limit || '10' }}"
+          $topK = [int]"${{ inputs.top_k || '5' }}"
           if ($limit -lt 0 -or $limit -gt 500) { throw "limit must be 0..500" }
           if ($topK -lt 1 -or $topK -gt 50) { throw "top_k must be 1..50" }
           .\benchmarks\arena\run-longmemeval.ps1 -Systems $systems -Limit $limit -TopK $topK -DownloadDataset -InstallDependencies
