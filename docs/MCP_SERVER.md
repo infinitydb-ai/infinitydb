@@ -29,9 +29,10 @@ floor for any Python MCP server, not something this implementation adds.
 
 ### Friction that the numbers do not capture
 
-- **The database path is working-directory dependent.** `INFINITYDB_PATH` defaults
-  to `infinity_mcp.db` in the host's cwd, which for GUI hosts can be surprising.
-  Set it explicitly in the config (the Claude Desktop snippet does).
+- **Working-directory dependence is fixed, not gone.** `INFINITYDB_PATH` now
+  defaults to an absolute `~/.infinitydb/memory.db` (see *Where memory lives*), so
+  a host cannot move the store by changing cwd. A *relative* value you supply
+  yourself still resolves against cwd — that is your choice, not a default.
 - **Single-user, no authentication.** The store is a local SQLite file with file
   permissions as its only access control. It is not safe as a shared or networked
   memory service; there is no multi-tenant scoping beyond `user_id` strings.
@@ -58,7 +59,7 @@ Add the following to your `claude_desktop_config.json`:
       "command": "python",
       "args": ["-m", "infinitydb.mcp_server"],
       "env": {
-        "INFINITYDB_PATH": "infinity_memory.db"
+        "INFINITYDB_PATH": "/Users/you/.infinitydb/memory.db"
       }
     }
   }
@@ -69,18 +70,63 @@ Add the following to your `claude_desktop_config.json`:
 
 ### 2. Cursor / Windsurf Configuration
 
-Add InfinityDB to your project's `.cursor/mcp.json`:
+Add InfinityDB to your project's `.cursor/mcp.json`, pointing at a store inside
+the project so this workspace's memory stays separate:
 
 ```json
 {
   "mcpServers": {
     "infinitydb": {
       "command": "python",
-      "args": ["-m", "infinitydb.mcp_server"]
+      "args": ["-m", "infinitydb.mcp_server"],
+      "env": {
+        "INFINITYDB_PATH": "${workspaceFolder}/.infinitydb/memory.db"
+      }
     }
   }
 }
 ```
+
+If `${workspaceFolder}` is not expanded by your host, write the absolute path.
+
+---
+
+## Where memory lives (scopes)
+
+The store is chosen by `INFINITYDB_PATH`. Without it, both the MCP server and
+`infinitydb.capture` use **`~/.infinitydb/memory.db`** — absolute, so a host's
+working directory can never move it, and auto-captured turns show up over MCP.
+
+| Scope | `INFINITYDB_PATH` | Use it when |
+|---|---|---|
+| **Global (default)** | unset → `~/.infinitydb/memory.db` | One memory across every chat and project, shared with auto-capture |
+| **Per project** | `/abs/path/to/project/.infinitydb/memory.db` | Work chats must not see a client's or another project's facts |
+| **Per host/profile** | `/abs/path/to/work.db` | Separate work and personal assistants on one machine |
+| **Throwaway** | `:memory:` | Trying the tools out; nothing is written to disk |
+
+Rules of thumb:
+
+- **Always use an absolute path** in a host config. A relative path is resolved
+  against the process's working directory, which a GUI host does not show you.
+- **One store per project** is the safest default for anything client-facing. Two
+  projects pointed at one global file is a data-boundary bug, not a feature.
+- **`user_id` is not a security boundary.** It separates memories inside one file;
+  it does not stop another tool that can read the file.
+
+### Migrating from the old relative default
+
+Servers started before 1.4.1 without `INFINITYDB_PATH` wrote `infinity_mcp.db`
+into whatever directory the host used. Nothing was deleted: the file is still
+there, and the new default simply does not pick it up. To keep that memory, point
+the config at it, or fold it into the new store:
+
+```bash
+# keep using the old file, explicitly
+INFINITYDB_PATH=/abs/path/where/infinity_mcp.db python -m infinitydb.mcp_server
+```
+
+To check which store a running server actually opened, call the `stats` tool: the
+row counts tell you immediately whether you are looking at the expected database.
 
 ---
 

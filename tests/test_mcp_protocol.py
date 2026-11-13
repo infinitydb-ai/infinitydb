@@ -8,6 +8,7 @@ non-flushing write fails here instead of in Claude Desktop.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import subprocess
@@ -18,12 +19,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _spawn(db_path: Path) -> subprocess.Popen:
+def _spawn(db_path: Path | None, home: Path) -> subprocess.Popen:
     env = {
         "PATH": "/usr/bin:/bin",
-        "INFINITYDB_PATH": str(db_path),
+        "HOME": str(home),  # never touch the developer's real ~/.infinitydb
         "PYTHONPATH": str(ROOT),
     }
+    if db_path is not None:
+        env["INFINITYDB_PATH"] = str(db_path)
     return subprocess.Popen(
         [sys.executable, "-m", "infinitydb.mcp_server"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -62,7 +65,7 @@ class _Client:
 
 
 def test_mcp_stdio_session(tmp_path):
-    proc = _spawn(tmp_path / "mcp.db")
+    proc = _spawn(tmp_path / "mcp.db", tmp_path)
     client = _Client(proc)
     try:
         init = client.send("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}})
@@ -96,6 +99,34 @@ def test_mcp_stdio_session(tmp_path):
         proc.stdin.close()  # type: ignore[union-attr]
         proc.wait(timeout=10)
         assert proc.returncode == 0
+
+
+def test_default_store_is_absolute_and_cwd_independent(tmp_path):
+    """A host's working directory must not decide where memory lives."""
+    proc = _spawn(None, tmp_path)
+    client = _Client(proc)
+    try:
+        init = client.send("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}})
+        assert init["result"]["serverInfo"]["name"] == "infinitydb"
+        client.send("tools/call", {"name": "add_memory",
+                                  "arguments": {"content": "User: I keep bees.", "user_id": "u1"}})
+    finally:
+        proc.stdin.close()  # type: ignore[union-attr]
+        proc.wait(timeout=10)
+    created = tmp_path / ".infinitydb" / "memory.db"
+    assert created.exists(), f"expected the default store at {created}"
+
+
+def test_env_var_still_overrides_the_default(tmp_path, monkeypatch):
+    from infinitydb import mcp_server
+
+    monkeypatch.setenv("INFINITYDB_PATH", str(tmp_path / "custom.db"))
+    assert mcp_server.default_db_path() == str(tmp_path / "custom.db")
+
+    monkeypatch.delenv("INFINITYDB_PATH")
+    fallback = mcp_server.default_db_path()
+    assert os.path.isabs(fallback)
+    assert fallback.endswith(os.path.join(".infinitydb", "memory.db"))
 
 
 def test_mcp_server_version_matches_package():
