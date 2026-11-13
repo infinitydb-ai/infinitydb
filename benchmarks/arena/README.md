@@ -312,6 +312,47 @@ For machines with 8 GB RAM, keep the default 100K synthetic workload initially.
 The 1M option is deliberately opt-in because memory and runtime depend on the
 host. FastEmbed downloads its embedding model on the first mem0/hybrid run.
 
+## LongMemEval-S commercial-use benchmark (Windows)
+
+LongMemEval is MIT-licensed and is the preferred dataset for commercial
+benchmark development. The comparable runner uses the cleaned S split
+(500 questions, approximately 265 MB) from the official Hugging Face dataset:
+https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned
+
+From PowerShell at the repository root:
+
+```powershell
+# First run a 10-question pilot; downloads the MIT-licensed dataset and installs
+# the pinned local embedding environments. Systems run sequentially.
+.\benchmarks\arena\run-longmemeval.ps1 -DownloadDataset -InstallDependencies -Limit 10
+
+# Resume the same run to complete all 500 questions per selected system.
+.\benchmarks\arena\run-longmemeval.ps1
+
+# Or run only InfinityDB if you want a dependency-light baseline first.
+.\benchmarks\arena\run-longmemeval.ps1 -Systems infinitydb -Limit 10
+```
+
+The LongMemEval-S runner currently compares three real adapters:
+InfinityDB, Mem0 OSS (`infer=False`, local FastEmbed) and BM25 + FastEmbed
+hybrid retrieval. It runs each question in an isolated store, uses the same
+top-K, attributes returned verbatim turns to their source sessions, and reports
+session recall on answerable questions separately from abstention questions.
+It also records answer-in-context, query latency, ingestion time and retrieved
+context size. No reader LLM or API credentials are used.
+
+Each system has a resumable JSONL file keyed by the dataset SHA-256 and top-K.
+The comparison JSON and per-system summaries are written to
+`benchmarks/arena/results/longmemeval/`. Run systems sequentially on Windows;
+first-time embedding model downloads can take time. On 8 GB machines, start
+with the 10-question pilot and check memory use before completing all 500.
+
+TencentDB's current adapter is specifically the LoCoMo FTS keyword harness; it
+is not included in the LongMemEval comparison until an equivalent LongMemEval
+adapter is added. Do not combine its LoCoMo score with LongMemEval results.
+The separate LongMemEval probe remains InfinityDB-only; use the three-system
+runner above for the comparable retrieval leaderboard.
+
 ## Limitations
 
 1. **Retrieval proxies, not answers.** `answer_in_context` says the gold tokens
