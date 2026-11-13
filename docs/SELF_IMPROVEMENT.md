@@ -244,6 +244,37 @@ change *candidate generation* rather than filter bridges — e.g. retrieve the t
 that witnessed the edge and quote it, instead of scoping by the object string —
 and this probe already provides the baseline and the controls to test that.
 
+### Phase 2b — quote the witnessing turn, measured 2026-11-13 — **first positive multi-hop signal, at low coverage**
+
+Instead of filtering by bridge object, append the turn that asserted the edge
+(`l1_entity_edges.atom_id` → `l1_atoms.fact`), rendered with its date, and give
+up that many recall slots. Same harness, same 281 multi-hop questions.
+
+| arm | overall multi-hop | delta | fired subset | subset delta |
+|---|---|---|---|---|
+| scope / all | 0.2468 | −0.2471 | n=281 | — |
+| scope / predicate | 0.4778 | −0.0161 | n=22 | — |
+| witness / all | 0.4524 | −0.0415 | n=277 | −0.0421 |
+| **witness / predicate (cap 2)** | **0.4984** | **+0.0045** | **n=22** | **+0.0568** |
+| witness / predicate (cap 1) | 0.4966 | +0.0027 | n=22 | +0.0341 |
+
+Finding the witness is a much better use of a bridge than scoping by its object:
+quoting every witness costs 4 points instead of 25, and with the strict gate it is
+the only arm in this entire document that lands above the baseline. On the 22
+questions where the gate fires, the gain is **+0.0568** (0.4583 → 0.5152).
+
+**Coverage is now the binding constraint, not accuracy.** The gate fires on 7.8%
+of multi-hop questions. If the same +0.057 held at full coverage, multi-hop would
+be ≈0.55 — the Phase 2 gate. With n=22 the confidence interval is wide, so this
+is a signal to chase, not a result to quote. Two witnesses beat one, which is
+consistent with the mechanism: one witness often quotes an unrelated assertion.
+
+The next step is therefore to raise coverage without spending precision — better
+entity linking into the question, aspect coverage for the multi-hop phrasings that
+currently match nothing ("What did X research after…"), and second-hop witnesses.
+That is what a learned selector should be asked to do: fire on many more questions
+with the same precision, at which point its inference cost is justified.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.

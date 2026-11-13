@@ -100,6 +100,31 @@ def render(result: dict) -> list[str]:
     return out
 
 
+def witness_facts(db: InfinityDB, bridges: list[Bridge], top_k: int) -> list[str]:
+    """The turns that asserted each edge, rendered like the adapter does.
+
+    This is the second hypothesis: a bridge is useful because a sentence exists
+    that says it, so quote that sentence rather than scoping retrieval by the
+    object string (which turned out to halve multi-hop recall).
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for bridge in bridges:
+        if not bridge.atom_id or bridge.atom_id in seen:
+            continue
+        seen.add(bridge.atom_id)
+        row = db.conn.execute(
+            "SELECT fact, ts FROM l1_atoms WHERE id = ?", (bridge.atom_id,)
+        ).fetchone()
+        if row is None:
+            continue
+        day = datetime.fromtimestamp(row["ts"]).strftime("%d %B %Y")
+        out.append(f"[{day}] {row['fact']}")
+        if len(out) >= top_k - 1:
+            break
+    return out
+
+
 def recall_hit(result: dict, ev_texts: list[str]) -> float:
     """Fraction of evidence turns found, matching score.py rather than a
     binary any-hit: multi-hop questions carry several evidence turns, and
@@ -116,15 +141,23 @@ def main() -> int:
     ap.add_argument("--convs", nargs="+", default=[],
                     help="conversation ids (default: every conversation in the dataset)")
     ap.add_argument("--selector", default="null", choices=sorted(SELECTORS))
+    ap.add_argument("--mode", default="scope", choices=("scope", "witness"),
+                    help="scope: pass bridge objects as entity filters. "
+                         "witness: quote the turns that asserted the edges instead.")
     ap.add_argument("--hops", type=int, default=2)
+    ap.add_argument("--max-bridges", type=int, default=0,
+                    help="override the selector's cap; each quoted witness displaces one recall slot")
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
     selector = SELECTORS[args.selector]()
+    if args.max_bridges and hasattr(selector, "max_bridges"):
+        selector.max_bridges = args.max_bridges
     convo_map = {c.sample_id: c for c in locomo.load()}
     report: dict[str, object] = {
         "selector": selector.name,
+        "mode": args.mode,
         "hops": args.hops,
         "top_k": args.top_k,
         "published_multi_hop_baseline": 0.4939,
@@ -133,7 +166,11 @@ def main() -> int:
 
     all_base: list[float] = []
     all_scoped: list[float] = []
-    all_bridged: list[float] = []
+    # Metrics restricted to questions the selector actually fired on, because an
+    # overall delta diluted by hundreds of untouched questions says nothing
+    # about whether the mechanism works where it applies.
+    fired_base: list[float] = []
+    fired_scoped: list[float] = []
 
     for conv_id in (args.convs or sorted(convo_map)):
         convo = convo_map[conv_id]
@@ -157,10 +194,21 @@ def main() -> int:
                 scoped_hits.append(recall_hit(baseline, ev))
                 continue
             bridge_count += 1
-            scoped = db.recall(qa.question, n=args.top_k, user_id=conv_id, now=now,
-                               reinforce=False, include_policies=False,
-                               entities=[b.object for b in bridges])
-            scoped_hits.append(recall_hit(scoped, ev))
+            if args.mode == "witness":
+                witnesses = witness_facts(db, bridges, args.top_k)
+                keep = max(1, args.top_k - len(witnesses))
+                base_result = db.recall(qa.question, n=keep, user_id=conv_id, now=now,
+                                        reinforce=False, include_policies=False)
+                facts = render(base_result)[:keep] + witnesses
+                value = score.evidence_hit(facts, ev)
+                scoped_hits.append(0.0 if value != value else value)
+            else:
+                scoped = db.recall(qa.question, n=args.top_k, user_id=conv_id, now=now,
+                                   reinforce=False, include_policies=False,
+                                   entities=[b.object for b in bridges])
+                scoped_hits.append(recall_hit(scoped, ev))
+            fired_base.append(base_hits[-1])
+            fired_scoped.append(scoped_hits[-1])
 
         base = round(sum(base_hits) / len(base_hits), 4) if base_hits else float("nan")
         scoped = round(sum(scoped_hits) / len(scoped_hits), 4) if scoped_hits else float("nan")
@@ -184,11 +232,23 @@ def main() -> int:
         "scoped_recall@10": overall_scoped,
         "delta": round(overall_scoped - overall_base, 4),
     }
+    fired_summary = {
+        "questions": len(fired_base),
+        "baseline_recall@10": round(sum(fired_base) / len(fired_base), 4) if fired_base else None,
+        "arm_recall@10": round(sum(fired_scoped) / len(fired_scoped), 4) if fired_scoped else None,
+    }
+    if fired_base:
+        fired_summary["delta"] = round(
+            (sum(fired_scoped) - sum(fired_base)) / len(fired_base), 4)
+    report["fired_subset"] = fired_summary
+    print(f"FIRED SUBSET n={fired_summary['questions']} "
+          f"baseline={fired_summary['baseline_recall@10']} arm={fired_summary['arm_recall@10']} "
+          f"delta={fired_summary.get('delta')}")
     print(f"\nOVERALL multi-hop n={len(all_base)} baseline={overall_base} scoped={overall_scoped} "
           f"delta={report['overall']['delta']:+.4f}")
     print(f"published multi-hop baseline (all conversations): 0.4939")
 
-    out = Path(args.out) if args.out else ARENA_DIR / "results" / f"bridge_probe_{selector.name}.json"
+    out = Path(args.out) if args.out else ARENA_DIR / "results" / f"bridge_probe_{selector.name}_{args.mode}.json"
     out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out}")
     return 0
