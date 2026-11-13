@@ -5,7 +5,7 @@ These are unit tests of the selectors only. The multi-hop measurement lives in
 baseline with the null selector before any comparison is trusted.
 """
 
-from infinitydb.bridge import AllBridge, Bridge, NullBridge, PredicateBridge
+from infinitydb.bridge import AllBridge, Bridge, NullBridge, PredicateBridge, SubjectBridge
 
 
 def _edges():
@@ -40,6 +40,25 @@ def test_predicate_bridge_accepts_nothing_without_an_aspect():
 
 def test_predicate_bridge_rejects_an_object_the_question_already_mentions():
     assert PredicateBridge().select("Is Caroline based in Bristol?", _edges()) == []
+
+
+def test_subject_bridge_fires_on_any_predicate_for_a_named_person():
+    chosen = SubjectBridge(max_bridges=2).select("What did Caroline research?", _edges())
+    assert chosen, "a named subject should produce bridges regardless of aspect"
+    assert all(b.subject == "caroline" for b in chosen)
+
+
+def test_subject_bridge_uses_inbound_edges_as_second_hop_witnesses():
+    # Reached via Caroline -> works_at -> the gym -> works_at <- Melanie:
+    # the shared object is not in the question, which is the point.
+    inbound = [Bridge("melanie", "works_at", "the gym", "L1_f", hops=2, direction="in")]
+    chosen = SubjectBridge(max_bridges=2).select("Where does Caroline work?", inbound)
+    assert chosen, "an inbound edge through a shared object is a legitimate second hop"
+    assert chosen[0].subject == "melanie"
+
+
+def test_subject_bridge_accepts_nothing_when_no_person_is_named():
+    assert SubjectBridge().select("What is her relationship status?", _edges()) == []
 
 
 def test_predicate_bridge_caps_bridges():

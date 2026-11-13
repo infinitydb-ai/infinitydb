@@ -35,6 +35,10 @@ class Bridge:
     object: str
     atom_id: str = ""
     hops: int = 1
+    # "out" when the named entity is the subject, "in" when it is the object
+    # and the edge arrives from someone else. Second-hop witnesses only exist
+    # on the inbound side: "Tom also works at the gym".
+    direction: str = "out"
 
 
 class BridgeSelector(Protocol):
@@ -81,6 +85,52 @@ class AllBridge:
             if not key or key in seen:
                 continue
             seen.add(key)
+            chosen.append(bridge)
+            if len(chosen) >= self.max_bridges:
+                break
+        return chosen
+
+
+class SubjectBridge:
+    """Accept edges belonging to a person the question actually names.
+
+    The middle ground between the strict aspect gate (fires on 7.8% of
+    multi-hop questions) and accepting everything (halves recall). A question
+    that names a person is asking about *that person's* facts, whatever the
+    predicate, so the subject itself is the relevance signal. It still refuses
+    an object the question already mentions, because that adds nothing.
+    """
+
+    name = "subject"
+
+    def __init__(self, max_bridges: int = 2, min_object_chars: int = 3) -> None:
+        self.max_bridges = max_bridges
+        self.min_object_chars = min_object_chars
+
+    def select(self, question: str, candidates: Sequence[Bridge]) -> list[Bridge]:
+        words = {word.strip(".,?!'\"").lower() for word in question.split()}
+        chosen: list[Bridge] = []
+        seen: set[str] = set()
+        for bridge in candidates:
+            named = bridge.subject.strip().lower() in words
+            # An inbound edge is one `relations()` reached *through* the named
+            # entity's edge: its object is the shared node, and its subject is
+            # the other party. Requiring the object in the question would make
+            # second-hop witnesses unreachable — the shared node is precisely
+            # what the question does not mention.
+            inbound = bridge.direction == "in"
+            if not (named or inbound):
+                continue
+            obj = bridge.object.strip()
+            if inbound:
+                # The inbound edge's useful string is the other party, not the
+                # object the question already names.
+                obj = bridge.subject.strip()
+            if len(obj) < self.min_object_chars or obj.lower() in words:
+                continue
+            if obj.lower() in seen:
+                continue
+            seen.add(obj.lower())
             chosen.append(bridge)
             if len(chosen) >= self.max_bridges:
                 break
@@ -145,4 +195,5 @@ class PredicateBridge:
         return chosen
 
 
-__all__ = ["AllBridge", "Bridge", "BridgeSelector", "NullBridge", "PredicateBridge"]
+__all__ = ["AllBridge", "Bridge", "BridgeSelector", "NullBridge", "PredicateBridge",
+           "SubjectBridge"]

@@ -38,10 +38,12 @@ for path in (str(ROOT), str(ARENA_DIR.parent)):
 
 from arena import locomo, score  # noqa: E402
 from arena.systems.base import turn_line  # noqa: E402
-from infinitydb.bridge import AllBridge, Bridge, NullBridge, PredicateBridge  # noqa: E402
+from infinitydb.bridge import (AllBridge, Bridge, NullBridge, PredicateBridge,  # noqa: E402
+                                SubjectBridge)
 from infinitydb.core.engine import InfinityDB  # noqa: E402
 
-SELECTORS = {"null": NullBridge, "all": AllBridge, "predicate": PredicateBridge}
+SELECTORS = {"null": NullBridge, "all": AllBridge, "predicate": PredicateBridge,
+             "subject": SubjectBridge}
 WORD = re.compile(r"[A-Za-z][A-Za-z'\-]+")
 
 
@@ -83,6 +85,7 @@ def candidates_for(db: InfinityDB, entities: list[str], user_id: str, hops: int)
                 object=relation["object"],
                 atom_id=relation.get("atom_id", ""),
                 hops=relation.get("hop", 1),
+                direction=relation.get("direction", "out"),
             ))
     return out
 

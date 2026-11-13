@@ -275,6 +275,43 @@ currently match nothing ("What did X research after…"), and second-hop witness
 That is what a learned selector should be asked to do: fire on many more questions
 with the same precision, at which point its inference cost is justified.
 
+### Phase 2c — raising coverage by naming the person, measured 2026-11-13 — **coverage bought, precision lost**
+
+`SubjectBridge` accepts any edge whose **subject is named in the question**, plus
+inbound edges as second-hop witnesses ("Melanie also works at the gym"), still
+refusing objects the question already mentions. The hypothesis was that the
+person, not the question aspect, is the relevance signal.
+
+| selector | coverage (fired / 281) | overall | delta | fired-subset delta |
+|---|---|---|---|---|
+| witness / predicate (2b) | 22 (7.8%) | 0.4984 | **+0.0045** | **+0.0568** |
+| witness / subject, cap 2 | 249 (89%) | 0.4685 | −0.0254 | −0.0287 |
+| witness / subject, cap 3 | 249 (89%) | 0.4575 | −0.0364 | −0.0411 |
+
+One bug was caught by a test rather than by the numbers: the first version of
+`SubjectBridge` required an inbound edge's object to appear in the question,
+which made second-hop witnesses unreachable — the shared node is exactly what
+the question does not name. Fixing it raised coverage from 237 to 249 of 281 and
+left the deltas essentially unchanged, which is itself informative: the extra
+reach did not contain the missing signal.
+
+**Coverage rose tenfold and the gain disappeared.** Naming a person is not enough
+to know which of their sentences answers the question: their facts include
+hobbies, meetings and passing remarks, and spending two evidence slots on them
+costs more than the occasional bridge gains. Even on the 237 questions the
+selector fires on, the arm is worse than the baseline.
+
+This is a real narrowing of the search space, and it sharpens what Phase 2 must
+be: the selector has to bind **question aspect to edge predicate**, not link
+persons. That is exactly the classification the teardown named, and the two
+cheap signals available without a model — person matching and predicate aspect —
+now have measured upper bounds. A learned selector must beat both, not just fire
+more often.
+
+Still open, and untested here: expanding aspect vocabulary ("research",
+"career", "activities") rather than expanding subject matching, which would keep
+aspect precision while raising coverage. That is the cheapest next experiment.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.
