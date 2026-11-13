@@ -110,8 +110,10 @@ $StressOutput = "benchmarks/arena/results/stress-$StressIterations.json"
 Invoke-Native -File $BasePython -Arguments @("benchmarks/reproducible.py", "--iterations", "$StressIterations", "--output", $StressOutput)
 
 $ScopedOutput = "benchmarks/arena/results/scores/scoped_probe.json"
+$ScopedProbeStatus = "skipped by flag"
 if (-not $SkipScopedProbe) {
     Invoke-Native -File $BasePython -Arguments @("benchmarks/arena/scoped_probe.py", "--out", $ScopedOutput)
+    $ScopedProbeStatus = $ScopedOutput
 }
 
 $LongMemEvalPath = Join-Path $PSScriptRoot "data\longmemeval_s.json"
@@ -129,8 +131,8 @@ $Manifest = [ordered]@{
     completed_at = (Get-Date).ToString("o")
     branch = (& git branch --show-current 2>$null)
     commit = (& git rev-parse HEAD 2>$null)
-    os = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
-    architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    os = [System.Environment]::OSVersion.VersionString
+    architecture = $env:PROCESSOR_ARCHITECTURE
     python = $PythonVersion.ToString()
     python_executable = $BasePython
     dataset = "LoCoMo-10"
@@ -142,7 +144,7 @@ $Manifest = [ordered]@{
     force_rerun = [bool]$Force
     stress_iterations = $StressIterations
     stress_result = $StressOutput
-    scoped_probe_result = if ($SkipScopedProbe) { "skipped by flag" } else { $ScopedOutput }
+    scoped_probe_result = $ScopedProbeStatus
     longmemeval = $LongMemEvalStatus
 }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $RunManifest) | Out-Null
