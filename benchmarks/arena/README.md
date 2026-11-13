@@ -9,6 +9,45 @@ publish with runs of the real packages, pinned by version.
 This directory is a measurement tool, not a certification. Read
 [Limitations](#limitations) before quoting any number from it.
 
+## Run it
+
+One entry point, no API key, no language model — retrieval metrics only:
+
+```bash
+# one conversation, one system: about a minute on a CPU-only machine
+python benchmarks/arena/arena.py run --systems infinitydb --convs conv-26
+
+# the full table from the README (needs the pinned competitor venvs)
+python benchmarks/arena/arena.py run --systems infinitydb mem0 hybrid
+
+# recompute every metric from the committed raw rows, and fail if it disagrees
+python benchmarks/arena/arena.py verify --results benchmarks/arena/results
+
+# render a citable table with the dataset hash, commit and host baked in
+python benchmarks/arena/arena.py cite --results benchmarks/arena/results
+```
+
+`run` writes `manifest.json` next to the results: the dataset path, its
+SHA-256, the conversation and question counts, the pinned version of every
+system, the interpreter, SQLite version, host, git commit and the exact command
+that produced the numbers. `cite` turns that into
+`CITATION_RESULTS.md` — a markdown table plus a BibTeX block — so a number
+travels with its provenance instead of being copied off a screenshot.
+
+`verify` is the part that makes the numbers citable: it re-scores from
+`results/<system>/*.jsonl`, compares the retrieval metrics to the committed
+`summary.json`, and exits non-zero on any drift. Latency and ingest time are
+excluded from that comparison because they are measured, not reproducible.
+Changing a committed score by hand is caught:
+
+```
+FAIL: infinitydb does not reproduce
+  evidence_recall@k: committed 0.9 != recomputed 0.7167
+```
+
+To cite the benchmark itself, GitHub reads [`CITATION.cff`](../../CITATION.cff)
+at the repository root.
+
 ## What is measured
 
 Each adapter is driven by [`worker.py`](worker.py) in its own interpreter, so a
