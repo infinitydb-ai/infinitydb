@@ -2,9 +2,45 @@
 
 > Plug-and-play Model Context Protocol (MCP) server for Claude Desktop, Cursor, Windsurf, and AI Agents.
 
-The InfinityDB MCP server gives any MCP-compliant AI assistant long-term neurosymbolic memory with deterministic recall, sub-millisecond lookups, causal relation tracking, and tamper-evident SHA-256 audit proofs.
+The InfinityDB MCP server gives any MCP-compliant AI assistant long-term neurosymbolic memory with deterministic recall, causal relation tracking, and tamper-evident SHA-256 audit proofs. Measured cost of adoption is below — the round trip through the transport is **~1.3 ms to write and ~2 ms to recall** on the machine described there, not sub-millisecond.
 
 ---
+
+## Measured friction
+
+Numbers instead of adjectives, reproducible with `python scripts/measure_mcp_friction.py`
+(raw output committed as [`mcp_friction.json`](mcp_friction.json)). Linux 6.1 x86_64,
+Python 3.12.3, three runs on the same machine.
+
+| What it costs | Measured |
+|---|---|
+| third-party packages pulled in | **0** |
+| wheel size | **60.6 KB** (`infinitydb_ai-1.4.1-py3-none-any.whl`) |
+| cold start, spawn to valid `initialize` reply | **65–82 ms** |
+| `tools/list` | 0.1–0.2 ms, 4,099 bytes, 10 tools |
+| `add_memory` | p50 **1.3–1.8 ms**, max 8.1 ms |
+| `recall_memory` | p50 **1.9–2.5 ms**, max 3.3 ms |
+| peak RSS of the server process | **19.8 MB** |
+| configuration | one `mcpServers` entry, 7 lines of JSON |
+
+Read the cold start as the host's per-session tax, not per-call: a host starts the
+process once and keeps it. The ~70 ms is Python plus SQLite import, so it is the
+floor for any Python MCP server, not something this implementation adds.
+
+### Friction that the numbers do not capture
+
+- **The database path is working-directory dependent.** `INFINITYDB_PATH` defaults
+  to `infinity_mcp.db` in the host's cwd, which for GUI hosts can be surprising.
+  Set it explicitly in the config (the Claude Desktop snippet does).
+- **Single-user, no authentication.** The store is a local SQLite file with file
+  permissions as its only access control. It is not safe as a shared or networked
+  memory service; there is no multi-tenant scoping beyond `user_id` strings.
+- **`initialize` always answers protocol version `2024-11-05`.** Hosts built
+  against newer revisions accept it, but this server does not negotiate.
+- **Host coverage is untested.** The transport is verified end to end by
+  `tests/test_mcp_protocol.py` (spawn, handshake, `tools/list`, a write, a recall,
+  and an unknown-method error), but no Claude Desktop, Cursor or Windsurf install
+  was driven here — those runs need a desktop host this environment does not have.
 
 ## Quick Setup
 

@@ -26,7 +26,9 @@ from typing import Any, Dict
 from infinitydb.core.engine import InfinityDB
 
 SERVER_NAME = "infinitydb"
-SERVER_VERSION = "1.3.0"
+# Must match pyproject.toml: MCP hosts display this, and a stale value makes an
+# installed server look older than the package it came from.
+SERVER_VERSION = "1.4.1"
 
 DB_PATH = os.environ.get("INFINITYDB_PATH", "infinity_mcp.db")
 db = InfinityDB(DB_PATH)
