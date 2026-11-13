@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("infinitydb", "mem0", "hybrid")]
-    [string[]]$Systems = @("infinitydb", "mem0", "hybrid"),
+    [ValidateSet("infinitydb", "mem0", "hybrid", "tencentdb-keyword")]
+    [string[]]$Systems = @("infinitydb", "mem0", "hybrid", "tencentdb-keyword"),
     [ValidateSet("full", "smoke")]
     [string]$Mode = "full",
     [ValidateRange(0, 100000)]
@@ -83,8 +83,9 @@ if ($NeedsMem0Env) {
     }
 }
 
+$PythonSystems = @($SelectedSystems | Where-Object { $_ -ne "tencentdb-keyword" })
 $RunSummaries = @()
-foreach ($System in $SelectedSystems) {
+foreach ($System in $PythonSystems) {
     if ($System -eq "infinitydb") { $SystemPython = $BasePython } else { $SystemPython = $Mem0Python }
     foreach ($Conversation in $Conversations) {
         $OutputPath = "benchmarks/arena/results/$System/$Conversation.jsonl"
@@ -97,6 +98,49 @@ foreach ($System in $SelectedSystems) {
         Invoke-Native -File $SystemPython -Arguments $WorkerArgs
     }
     $RunSummaries += $System
+}
+
+# TencentDB Agent Memory keyword/FTS mode is a separate real Node harness.
+# It has no model/API requirement; it is deliberately labelled keyword-only.
+$TencentCompleted = $false
+if ($SelectedSystems -contains "tencentdb-keyword") {
+    $NodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    $NpmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $NodeCommand -or -not $NpmCommand) {
+        throw "tencentdb-keyword requires Node.js >=22 and npm.cmd. Install Node 22+ or omit it with -Systems."
+    }
+    $NodeVersionRaw = & $NodeCommand.Source --version
+    if ($LASTEXITCODE -ne 0 -or $NodeVersionRaw -notmatch "^v?(\d+)\.") {
+        throw "Could not determine Node.js version: $NodeVersionRaw"
+    }
+    if ([int]$Matches[1] -lt 22) { throw "tencentdb-keyword requires Node.js >=22; found $NodeVersionRaw." }
+
+    $TencentDir = Join-Path $PSScriptRoot "systems\tencentdb_keyword"
+    $TencentInput = Join-Path $TencentDir "input"
+    $TencentOut = Join-Path $TencentDir "out"
+    $ArenaInput = ".arena/tencentdb/input"
+    $ArenaOut = ".arena/tencentdb/out"
+    New-Item -ItemType Directory -Force -Path $TencentInput, $TencentOut, $ArenaInput, $ArenaOut | Out-Null
+    if ($InstallDependencies) {
+        Push-Location $TencentDir
+        try { Invoke-Native -File $NpmCommand.Source -Arguments @("install", "--no-audit", "--no-fund") }
+        finally { Pop-Location }
+    }
+    $Tsx = Join-Path $TencentDir "node_modules\.bin\tsx.cmd"
+    if (-not (Test-Path $Tsx)) { throw "TencentDB TypeScript runner is missing. Re-run with -InstallDependencies." }
+
+    $ExporterArgs = @("benchmarks/arena/systems/tencentdb_keyword/export_input.py") + $Conversations
+    Invoke-Native -File $BasePython -Arguments $ExporterArgs
+    foreach ($Conversation in $Conversations) {
+        Copy-Item -Force (Join-Path $ArenaInput "$Conversation.json") (Join-Path $TencentInput "$Conversation.json")
+        Push-Location $TencentDir
+        try { Invoke-Native -File $Tsx -Arguments @("harness.mts", $Conversation) }
+        finally { Pop-Location }
+        Copy-Item -Force (Join-Path $TencentOut "$Conversation.json") (Join-Path $ArenaOut "$Conversation.json")
+    }
+    $TencentScoreArgs = @("benchmarks/arena/systems/tencentdb_keyword/score.py") + $Conversations
+    Invoke-Native -File $BasePython -Arguments $TencentScoreArgs
+    $TencentCompleted = $true
 }
 
 $ScoreArgs = @("benchmarks/arena/score.py", "--systems", ($RunSummaries -join ","))
@@ -138,7 +182,8 @@ $Manifest = [ordered]@{
     dataset = "LoCoMo-10"
     dataset_sha256 = $DatasetHash
     conversations = $Conversations
-    systems = $RunSummaries
+    systems = @($RunSummaries + $(if ($TencentCompleted) { @("tencentdb-keyword") } else { @() }))
+    tencentdb_keyword_mode = if ($TencentCompleted) { "completed: FTS keyword-only, no LLM" } else { "not selected" }
     max_questions_per_conversation = $MaxQuestions
     reader_enabled = [bool]$WithReader
     force_rerun = [bool]$Force
