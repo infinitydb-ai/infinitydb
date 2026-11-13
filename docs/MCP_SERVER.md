@@ -45,6 +45,25 @@ floor for any Python MCP server, not something this implementation adds.
 
 ## Quick Setup
 
+### 0. One command, no clone (recommended)
+
+```bash
+# Claude Code
+claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp
+
+# or run it directly to check it starts
+uvx --from infinitydb-ai infinitydb-mcp
+```
+
+`uvx` fetches the package into an ephemeral environment and runs the console
+script, so there is no virtualenv to create and nothing to keep in sync. `pip
+install infinitydb-ai` then `infinitydb-mcp` is equivalent if you already manage an
+environment. `npx` is not needed: the npm package is the JS client, not this server.
+
+A ready-to-copy [`.mcp.json`](../.mcp.json) lives in the repository root; commit it
+into a project and a host that reads project config will offer the tools with no
+editing.
+
 ### 1. Claude Desktop Configuration
 
 Add the following to your `claude_desktop_config.json`:

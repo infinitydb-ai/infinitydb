@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "infinitydb": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "infinitydb-ai",
+        "infinitydb-mcp"
+      ],
+      "env": {
+        "INFINITYDB_PATH": "${workspaceFolder}/.infinitydb/memory.db"
+      }
+    }
+  }
+}

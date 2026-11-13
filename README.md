@@ -28,6 +28,45 @@
 
 ---
 
+## Try it in one command
+
+```bash
+pip install infinitydb-ai && python -m infinitydb.demo
+```
+
+That writes three turns, extracts facts, and answers three questions — in memory, with no
+model call and no network. Real output from that command on an 8-vCPU CPU-only host:
+
+```text
+InfinityDB demo — in-memory, no model calls, no network
+  open       3.9 ms
+  ingest     4.6 ms  (3 turns)
+
+query: 'where does the user live'
+  [1.056] I moved to Lisbon in March 2024 and I work as a data engineer at a ceramics studio
+
+query: 'what do they do for work'
+  [0.869] I work as a data engineer at a ceramics studio
+
+  stored  facts=4 proofs=4 backend=SQLite-WAL
+  recall  1.9 ms over 3 questions
+```
+
+**Give the same memory to an agent over MCP** (Claude Code, Cursor, Windsurf), no clone needed:
+
+```bash
+claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp
+```
+
+Or copy [`.mcp.json`](.mcp.json) into a project and open it. 10 tools, 7 lines of config,
+zero dependencies. See [docs/MCP_SERVER.md](docs/MCP_SERVER.md) for scopes and hosts.
+
+The benchmark table further down is checked by `./scripts/verify.sh`; `python
+benchmarks/arena/arena.py verify` re-derives the arena metrics from the committed
+per-question rows and fails if any of them disagree.
+
+---
+
 ## Why InfinityDB
 
 Most memory systems compress history into an opaque vector pile. When recall fails, you are left guessing. InfinityDB builds a structured, verifiable semantic pyramid.
@@ -152,6 +191,7 @@ is not, and the known gaps ranked — is in [docs/DILIGENCE.md](docs/DILIGENCE.m
 ### Python
 ```bash
 pip install infinitydb-ai
+python -m infinitydb.demo    # writes 3 turns, answers 3 questions, exits
 ```
 
 Local development:
