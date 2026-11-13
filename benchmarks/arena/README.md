@@ -246,6 +246,14 @@ The original `run.sh` remains the Unix entry point. Native Windows users can
 run the same existing worker and scorer through `run.ps1`; it does not replace
 or rewrite any adapter.
 
+**Dataset licence gate:** the upstream LoCoMo dataset is CC BY-NC 4.0. Do not
+use it for commercial benchmarking, marketing or product claims unless you
+have separate permission. The runner requires an explicit non-commercial-use
+acknowledgement; it never downloads the dataset unless `-DownloadLoCoMo` is
+also supplied. The dataset is not committed to this repository. See the
+[upstream dataset](https://github.com/snap-research/locomo) and
+[CC BY-NC 4.0 terms](https://creativecommons.org/licenses/by-nc/4.0/).
+
 From the repository root in PowerShell:
 
 ```powershell
@@ -271,7 +279,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 The Windows runner performs the following without Bash or WSL:
 
-1. Checks Python 3.10+, verifies the LoCoMo dataset and records its SHA-256.
+1. Requires an explicit LoCoMo non-commercial-use acknowledgement, optionally downloads the official dataset, checks Python 3.10+, and records the dataset SHA-256.
 2. Compiles the arena Python modules and runs the selected real adapters over
    all ten LoCoMo conversations. Completed JSONL files are reused unless
    `-Force` is supplied.
@@ -285,12 +293,12 @@ The Windows runner performs the following without Bash or WSL:
    result is **not** a competitor score.
 6. Runs the full LongMemEval probe if
    `benchmarks/arena/data/longmemeval_s.json` is present. The 278 MB dataset
-   is not committed; without it the runner records that this probe was skipped.
+   is not committed; without it the runner records that this probe was skipped. LongMemEval is MIT-licensed; retain its attribution.
 7. Writes a Windows run manifest under `benchmarks/arena/results/scores/`
    containing the dataset hash, OS, Python version, selected systems and probe
    status. Raw per-question JSONL remains under `results/<system>/`.
 
-The no-credential default compares InfinityDB, mem0 OSS in `infer=False`
+The non-commercial LoCoMo run compares InfinityDB, mem0 OSS in `infer=False`
 mode, the local BM25 + FastEmbed hybrid control, and TencentDB Agent Memory
 in its real FTS keyword-only mode. TencentDB runs through its separate pinned
 Node/TypeScript harness and is scored separately because it does not emit the
