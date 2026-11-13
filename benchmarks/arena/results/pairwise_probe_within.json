@@ -13,6 +13,7 @@
   "epochs": 8,
   "labels": {
     "oracle": {
+      "deployable_labels": false,
       "epochs": 8,
       "fit": {
         "recall@1": 0.5802,
@@ -41,6 +42,7 @@
       }
     },
     "answer": {
+      "deployable_labels": false,
       "epochs": 4,
       "fit": {
         "recall@1": 0.5606,
@@ -66,6 +68,35 @@
         "who": 0.5,
         "recency": 0.5268,
         "length": 0.0108
+      }
+    },
+    "agreement": {
+      "deployable_labels": true,
+      "epochs": 4,
+      "fit": {
+        "recall@1": 0.5573,
+        "recall@3": 0.7209,
+        "recall@10": 0.8176
+      },
+      "heldout": {
+        "recall@1": 0.693,
+        "recall@3": 0.8496,
+        "recall@10": 0.9198
+      },
+      "delta": {
+        "recall@1": 0.0,
+        "recall@3": 0.0075,
+        "recall@10": 0.0
+      },
+      "weights": {
+        "bias": 0.0,
+        "rank": 6.0371,
+        "overlap": 1.7653,
+        "date": 0.0,
+        "place": 0.05,
+        "who": -0.15,
+        "recency": 0.3595,
+        "length": 0.0017
       }
     }
   },

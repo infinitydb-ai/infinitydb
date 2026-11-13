@@ -117,17 +117,60 @@ def labels_for(row: dict, conv_map, scheme: str) -> list[bool]:
     return [fb.label_memory(memory, row, ev, scheme) for memory in row["retrieved"]]
 
 
+def _independent_score(question: str, memory: str, span) -> float:
+    """A deliberately different ranking: overlap and recency, with no rank feature.
+
+    Its disagreement with the lexical order is what the agreement label uses.
+    """
+    return (
+        2.0 * features(question, memory, 0, span)[2]
+        + 0.5 * features(question, memory, 0, span)[6]
+        + 0.3 * features(question, memory, 0, span)[4]
+    )
+
+
+def agreement_labels(row: dict, span) -> list[bool | None]:
+    """Labels available in a real deployment: two rankers agreeing, no gold used.
+
+    Positive when a memory is in the top 3 of both the existing ranking and an
+    independent overlap/recency ranking; negative when it is in the bottom half
+    of both. Everything else is abstained (``None``), because a weak label
+    should say nothing rather than guess. Nothing here reads the answer or the
+    evidence ids.
+    """
+    memories = row["retrieved"]
+    n = len(memories)
+    base_top = set(range(min(3, n)))
+    independent = sorted(range(n), key=lambda i: _independent_score(row["question"], memories[i], span),
+                         reverse=True)[: min(3, n)]
+    independent_top = set(independent)
+    labels: list[bool | None] = []
+    for index in range(n):
+        if index in base_top and index in independent_top:
+            labels.append(True)
+        elif index not in base_top and index not in independent_top and index >= n // 2:
+            labels.append(False)
+        else:
+            labels.append(None)
+    return labels
+
+
 def train(rows: list[dict], conv_map, span_map, scheme: str, epochs: int, lr: float) -> list[float]:
     weights = [0.0] * len(FEATURES)
     for _ in range(epochs):
         for row in rows:
-            labels = labels_for(row, conv_map, scheme)
-            if not any(labels) or all(labels):
+            if scheme == "agreement":
+                labels = agreement_labels(row, span_map.get(row["conv"]))
+            else:
+                labels = labels_for(row, conv_map, scheme)
+            if not any(label for label in labels) or all(label for label in labels):
                 continue
             feats = [features(row["question"], memory, rank, span_map.get(row["conv"]))
                      for rank, memory in enumerate(row["retrieved"])]
             positives = [i for i, ok in enumerate(labels) if ok]
-            negatives = [i for i, ok in enumerate(labels) if not ok][:5]
+            negatives = [i for i, ok in enumerate(labels) if ok is False][:5]
+            if not positives or not negatives:
+                continue
             for pos in positives:
                 for neg in negatives:
                     margin = sum(w * (a - b) for w, a, b in zip(weights, feats[pos], feats[neg]))
@@ -196,7 +239,7 @@ def main() -> int:
     print(f"baseline (existing ranking) held-out: {baseline}\n")
     report["heldout_baseline"] = baseline
 
-    for scheme in ("oracle", "answer"):
+    for scheme in ("oracle", "answer", "agreement"):
         best = None
         for epochs in (4, args.epochs, 16):
             weights = train(fit_rows, conv_map, span_map, scheme, epochs, 0.05)
@@ -212,6 +255,7 @@ def main() -> int:
         delta = {k: round(held[k] - baseline[k], 4) for k in baseline}
         print(f"[{scheme}] delta vs baseline: {delta}\n")
         report["labels"][scheme] = {
+            "deployable_labels": scheme == "agreement",
             "epochs": epochs,
             "fit": fit,
             "heldout": held,

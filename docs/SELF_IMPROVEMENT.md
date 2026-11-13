@@ -158,6 +158,43 @@ worth knowing and not worth shipping on its own. The next step is not more
 features; it is a deployable label source, so the training signal matches what a
 deployment can actually observe.
 
+### Phase 1c — a deployable label source, measured 2026-11-13 — **transfers about 40% of the gain**
+
+The question phase 1b raised: if gold labels buy 1.4–1.9 points, how much of
+that survives when the labels must be produced in production, with no gold
+answers and no reader model?
+
+**The label.** Agreement between two independent rankers, which is observable at
+runtime and reads neither the answer nor the evidence ids:
+
+- positive — a memory in the top 3 of *both* the existing ranking and an
+  independent overlap/recency ranking,
+- negative — in the bottom half of both,
+- **abstain** otherwise, because a weak label should say nothing rather than guess.
+
+Held-out, same three folds, same features:
+
+| fold | deployable labels, recall@1 | recall@3 | gold labels, recall@3 (1b) |
+|---|---|---|---|
+| conversations A→B | 0.0000 | +0.0052 | +0.0145 |
+| conversations B→A | 0.0000 | +0.0069 | +0.0188 |
+| within conversation | 0.0000 | +0.0075 | +0.0138 |
+
+**Deployable labels keep roughly 35–55% of the recall@3 gain and none of the
+recall@1 gain.** The learned weights say why: `rank=+6.04`, an order of
+magnitude above every other feature, against `rank=+0.68` under gold labels. The
+agreement label is *partly a function of the base ranking* — "top 3 of both"
+means "top 3 of the existing order" — so the model mostly learns "do not disturb
+the ranking", plus a small recency/overlap correction. That circularity is the
+ceiling of free supervision, and it is now measured rather than assumed.
+
+**What this settles.** The binding constraint in this whole family is label
+quality, not feature count or model capacity. Capturing the remaining ~1 point
+requires a label a deployment cannot fake: a reader's answer, or a user's thumb
+on a cited memory. It also re-confirms the outer bound: this family re-ranks a
+fixed candidate list, so it can never move recall@10 or any published headline
+number. Only candidate *generation* — Phase 2's bridge selector — can do that.
+
 ## Phase 2 — a learned bridge selector for multi-hop
 
 **Question:** can multi-hop move past 0.4939?
