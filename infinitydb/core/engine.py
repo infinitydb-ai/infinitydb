@@ -694,6 +694,16 @@ class InfinityDB:
             (r"(?i:I hate|I dislike|I avoid|never use)\s+([^.,\n]+)", "dislike", 0.88),
             (r"(?i:my budget is|budget of|budget:\s*)\s*([$\u20ac\u00a3\u00a5]?[0-9,]+(?:\s*[kKmMbB])?)", "budget", 0.94),
             (r"(?i:I live in|I am living in|I['\u2019]m living in|I['\u2019]m based in|based in|located in|I moved to|I['\u2019]ve moved to|I relocated to)\s+([^.,\n]+)", "location", 0.85),
+            # Third-person phrasing about the person the store is about ("User relocated
+            # to Berlin"). Without these, the same fact stated as "I moved to Lisbon" and
+            # "User is based in Munich" landed in different categories, so the
+            # single-valued rules never saw a conflict and no contradiction was recorded.
+            # The subject is required and limited to "user" on purpose: bare "moved to"
+            # would swallow "the team moved to a new office" and supersede a real home.
+            # "based in" / "located in" are already covered above without a subject.
+            (r"(?i:(?:the )?user (?:has |had )?(?:moved|relocated|settled|resettled) (?:to|in)|(?:the )?user (?:now )?(?:lives|resides|lived|resided) in|(?:the )?user is (?:now )?living in)\s+([^.,\n]+)", "location", 0.82),
+            (r"(?i:(?:the )?user (?:works|worked|is working) (?:at|for)|(?:the )?user (?:has )?joined)\s+([^.,\n]+)", "employer", 0.84),
+            (r"(?i:(?:the )?user's (?:role|job|title|position) is)\s+([^.,\n]+)", "role", 0.86),
             (r"(?i:our goal is|aiming to|target is|deadline is)\s+([^.,\n]+)", "goal", 0.91),
             (r"(?i:must comply with|required to|constraint:\s*)\s+([^.,\n]+)", "constraint", 0.95),
             (r"(?i:my (?:sister|brother|mother|father|mom|dad|wife|husband|partner|daughter|son|friend|colleague|boss|manager))\s+(?i:lives in|works (?:at|for)|moved to|is based in)\s+([^.,\n]+)", "relation", 0.80),

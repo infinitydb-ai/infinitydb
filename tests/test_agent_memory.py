@@ -65,6 +65,45 @@ def test_core_engine_context_manager_closes_connection():
         connection.execute("SELECT 1")
 
 
+def test_third_person_location_phrasing_records_a_contradiction():
+    """The same fact in third person must reach the single-valued category.
+
+    Regression: "User relocated to Berlin" was classified `general` while
+    "based in Munich now" was `location`, so the two statements about one person
+    never conflicted and `contradictions()` stayed empty.
+    """
+    from infinitydb.core.engine import InfinityDB
+
+    db = InfinityDB(":memory:")
+    db.add("User relocated to Berlin last spring", user_id="u3", ts=1680000000.0)
+    db.add("User is based in Munich now", user_id="u3", ts=1700000000.0)
+
+    rows = list(db.conn.execute("SELECT category, fact FROM l1_atoms"))
+    assert {r["category"] for r in rows} == {"location"}
+
+    contradictions = db.contradictions("u3")
+    assert len(contradictions) == 1
+    assert "Berlin" in contradictions[0]["old_fact"]
+    assert "Munich" in contradictions[0]["new_fact"]
+
+    # The resolved persona carries the newer value, not the older one, and only
+    # one atom per sentence was extracted (no duplicate from overlapping rules).
+    assert "Munich" in db.get_persona("u3")["location"]
+    assert len(rows) == 2
+
+
+def test_third_person_patterns_do_not_claim_unrelated_sentences():
+    """A subject other than the user must not be stored as the user's location."""
+    from infinitydb.core.engine import InfinityDB
+
+    db = InfinityDB(":memory:")
+    db.add("The team moved to a new office", user_id="u4")
+    db.add("Our goal is a faster release cycle", user_id="u4")
+    categories = {r["category"] for r in db.conn.execute("SELECT category FROM l1_atoms")}
+    assert "location" not in categories
+    assert db.contradictions("u4") == []
+
+
 def test_search_matches_inflected_forms_of_the_query_term():
     """The atom index is unstemmed, so the match string has to bridge inflections.
 
