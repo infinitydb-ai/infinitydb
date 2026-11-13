@@ -255,9 +255,12 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 # Fast local validation: dataset, scorer and real InfinityDB adapter
 .\benchmarks\arena\run.ps1 -Mode smoke
 
-# Full LoCoMo run: all 10 conversations, InfinityDB + mem0 OSS + BM25/dense
-# Installs the pinned mem0/hybrid environment into .arena\venvs\mem0.
+# Full LoCoMo run: all 10 conversations, InfinityDB + mem0 + hybrid + TencentDB keyword
+# Installs pinned Python and Node dependencies into .arena and the Tencent harness.
 .\benchmarks\arena\run.ps1 -InstallDependencies
+
+# Python-only run if Node.js 22+ is not installed
+.\benchmarks\arena\run.ps1 -Systems infinitydb,mem0,hybrid -InstallDependencies
 
 # Optional: enable a local Ollama reader for end-to-end QA metrics
 .\benchmarks\arena\run.ps1 -WithReader
