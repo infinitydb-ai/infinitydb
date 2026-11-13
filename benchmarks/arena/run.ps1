@@ -143,10 +143,12 @@ if ($SelectedSystems -contains "tencentdb-keyword") {
     $TencentCompleted = $true
 }
 
-$ScoreArgs = @("benchmarks/arena/score.py", "--systems", ($RunSummaries -join ","))
-if (-not $WithReader) { $ScoreArgs += "--no-reader" }
-else { Write-Host "Reader evaluation requested. Ensure Ollama is running and ARENA_READER_MODEL is pulled." -ForegroundColor Yellow }
-Invoke-Native -File $BasePython -Arguments $ScoreArgs
+if ($RunSummaries.Count -gt 0) {
+    $ScoreArgs = @("benchmarks/arena/score.py", "--systems", ($RunSummaries -join ","))
+    if (-not $WithReader) { $ScoreArgs += "--no-reader" }
+    else { Write-Host "Reader evaluation requested. Ensure Ollama is running and ARENA_READER_MODEL is pulled." -ForegroundColor Yellow }
+    Invoke-Native -File $BasePython -Arguments $ScoreArgs
+}
 
 # Separate, explicitly labelled InfinityDB-only scale test. It is not a
 # competitor result and must never be merged into the LoCoMo leaderboard.
@@ -169,6 +171,11 @@ if (-not $SkipLongMemEval -and (Test-Path $LongMemEvalPath)) {
     $LongMemEvalStatus = "skipped by flag"
 }
 
+$ManifestSystems = @($RunSummaries)
+if ($TencentCompleted) { $ManifestSystems += "tencentdb-keyword" }
+$TencentModeStatus = "not selected"
+if ($TencentCompleted) { $TencentModeStatus = "completed: FTS keyword-only, no LLM" }
+
 $Manifest = [ordered]@{
     benchmark = "InfinityDB Benchmark Arena v2"
     started_at = $RunStamp
@@ -182,8 +189,8 @@ $Manifest = [ordered]@{
     dataset = "LoCoMo-10"
     dataset_sha256 = $DatasetHash
     conversations = $Conversations
-    systems = @($RunSummaries + $(if ($TencentCompleted) { @("tencentdb-keyword") } else { @() }))
-    tencentdb_keyword_mode = if ($TencentCompleted) { "completed: FTS keyword-only, no LLM" } else { "not selected" }
+    systems = $ManifestSystems
+    tencentdb_keyword_mode = $TencentModeStatus
     max_questions_per_conversation = $MaxQuestions
     reader_enabled = [bool]$WithReader
     force_rerun = [bool]$Force
