@@ -123,7 +123,7 @@ if ($SelectedSystems -contains "tencentdb-keyword") {
     New-Item -ItemType Directory -Force -Path $TencentInput, $TencentOut, $ArenaInput, $ArenaOut | Out-Null
     if ($InstallDependencies) {
         Push-Location $TencentDir
-        try { Invoke-Native -File $NpmCommand.Source -Arguments @("install", "--no-audit", "--no-fund") }
+        try { Invoke-Native -File $NpmCommand.Source -Arguments @("install", "--no-audit", "--no-fund", "--package-lock=false") }
         finally { Pop-Location }
     }
     $Tsx = Join-Path $TencentDir "node_modules\.bin\tsx.cmd"
