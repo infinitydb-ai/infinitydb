@@ -57,15 +57,15 @@ if ($NeedsEmbeddingEnv) {
 }
 
 Invoke-Native -File $Python -Arguments @("-m", "compileall", "-q", "benchmarks/arena")
-$Args = @(
+$ArenaArgs = @(
     "benchmarks/arena/longmemeval_arena.py",
     "--path", $DatasetFullPath,
     "--systems", ($Systems -join ","),
     "--top-k", "$TopK"
 )
-if ($Limit -gt 0) { $Args += @("--limit", "$Limit") }
-if ($Force) { $Args += "--force" }
+if ($Limit -gt 0) { $ArenaArgs += @("--limit", "$Limit") }
+if ($Force) { $ArenaArgs += "--force" }
 $ArenaPython = $Python
 if ($NeedsEmbeddingEnv) { $ArenaPython = $Mem0Python }
-Invoke-Native -File $ArenaPython -Arguments $Args
+Invoke-Native -File $ArenaPython -Arguments $ArenaArgs
 Write-Host "LongMemEval comparison complete. Results are under benchmarks/arena/results/longmemeval/." -ForegroundColor Green
