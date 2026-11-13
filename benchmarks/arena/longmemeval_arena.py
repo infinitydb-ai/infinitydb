@@ -28,14 +28,21 @@ from arena.locomo import Session, Turn  # noqa: E402
 from arena.score import answer_in_context  # noqa: E402
 from arena.systems.infinitydb_system import InfinityDBSystem  # noqa: E402
 from arena.systems.mem0_system import Mem0System  # noqa: E402
-from arena.systems.hybrid_system import HybridSystem  # noqa: E402
 from arena.systems.base import turn_line  # noqa: E402
 
-SYSTEMS = {
-    "infinitydb": InfinityDBSystem,
-    "mem0": Mem0System,
-    "hybrid": HybridSystem,
-}
+SYSTEMS = {"infinitydb", "mem0", "hybrid"}
+
+
+def get_system_class(name: str):
+    if name == "infinitydb":
+        return InfinityDBSystem
+    if name == "mem0":
+        return Mem0System
+    if name == "hybrid":
+        # numpy/FastEmbed are optional and are installed only in the embedding venv.
+        from arena.systems.hybrid_system import HybridSystem
+        return HybridSystem
+    raise ValueError(f"unsupported system: {name}")
 
 
 def sha256_file(path: Path) -> str:
@@ -91,9 +98,12 @@ def run_system(
     limit: int,
     force: bool,
 ) -> dict[str, Any]:
-    adapter_cls = SYSTEMS[system_name]
+    adapter_cls = get_system_class(system_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{system_name}-{dataset_hash[:12]}-k{top_k}.jsonl"
+    if force and out_path.exists():
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        out_path = output_dir / f"{system_name}-{dataset_hash[:12]}-k{top_k}-rerun-{stamp}.jsonl"
     done: set[str] = set()
     if out_path.exists() and not force:
         for line in out_path.read_text(encoding="utf-8").splitlines():
@@ -262,7 +272,7 @@ def main() -> None:
     dataset_hash = sha256_file(path)
     entries = longmemeval.load(path)
     selected = [name.strip() for name in args.systems.split(",") if name.strip()]
-    unknown = sorted(set(selected) - set(SYSTEMS))
+    unknown = sorted(set(selected) - SYSTEMS)
     if unknown:
         parser.error(f"unsupported systems: {', '.join(unknown)}; choose from {', '.join(SYSTEMS)}")
     if not selected:
