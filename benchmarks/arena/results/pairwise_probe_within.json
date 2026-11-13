@@ -1,0 +1,77 @@
+{
+  "protocol": "within split; perceptron trained on the fit half only",
+  "features": [
+    "bias",
+    "rank",
+    "overlap",
+    "date",
+    "place",
+    "who",
+    "recency",
+    "length"
+  ],
+  "epochs": 8,
+  "labels": {
+    "oracle": {
+      "epochs": 8,
+      "fit": {
+        "recall@1": 0.5802,
+        "recall@3": 0.732,
+        "recall@10": 0.8176
+      },
+      "heldout": {
+        "recall@1": 0.7193,
+        "recall@3": 0.8471,
+        "recall@10": 0.9198
+      },
+      "delta": {
+        "recall@1": 0.0263,
+        "recall@3": 0.005,
+        "recall@10": 0.0
+      },
+      "weights": {
+        "bias": 0.0,
+        "rank": 0.7049,
+        "overlap": 3.3936,
+        "date": -0.35,
+        "place": 0.8,
+        "who": -0.3,
+        "recency": -0.148,
+        "length": 0.5742
+      }
+    },
+    "answer": {
+      "epochs": 4,
+      "fit": {
+        "recall@1": 0.5606,
+        "recall@3": 0.7311,
+        "recall@10": 0.8176
+      },
+      "heldout": {
+        "recall@1": 0.6905,
+        "recall@3": 0.8559,
+        "recall@10": 0.9198
+      },
+      "delta": {
+        "recall@1": -0.0025,
+        "recall@3": 0.0138,
+        "recall@10": 0.0
+      },
+      "weights": {
+        "bias": 0.0,
+        "rank": 1.5653,
+        "overlap": 1.5715,
+        "date": -0.1,
+        "place": 1.2,
+        "who": 0.5,
+        "recency": 0.5268,
+        "length": 0.0108
+      }
+    }
+  },
+  "heldout_baseline": {
+    "recall@1": 0.693,
+    "recall@3": 0.8421,
+    "recall@10": 0.9198
+  }
+}
