@@ -336,6 +336,31 @@ current effect size does not clear it, so the next step must raise the effect pe
 question, not only the number of questions. That is the learned selector's real
 job, and it is why spending inference on it is now justified rather than assumed.
 
+### Phase 2e — witness position, measured 2026-11-13 — **the metric is order-blind; promote at your peril**
+
+Every arm so far appended witnesses *after* the retrieved head. `--position top`
+puts them first instead. Both use the same witnesses, so @10 is identical by
+construction — `score.evidence_hit` joins the context into one blob. The
+informative part is the prefix.
+
+| position | @1 all | @3 all | @10 all | @1 fired | @3 fired |
+|---|---|---|---|---|---|
+| baseline, no witnesses | 0.1750 | 0.3181 | 0.4939 | 0.1488 | 0.2747 |
+| **witness bottom (2d)** | **0.1750** | **0.3181** | **0.5000** | **0.1488** | **0.2747** |
+| witness top | 0.1517 | 0.2881 | 0.5000 | 0.0153 | 0.1027 |
+
+Two findings:
+
+1. **Pushing witnesses to the front is destructive.** On the questions that fire
+   it costs 0.13 at @1 and 0.17 at @3: the witnessing turn is an intermediate
+   hop's sentence ("Caroline works at the gym"), not the sentence that answers
+   ("Tom joined the gym in May"). A production wiring must therefore append,
+   never promote.
+2. **@10 cannot see any of this.** Because `score.evidence_hit` is set-based, the
+   same ten memories score identically in any order — which also means the
+   +0.0061 in Phase 2d is an *inclusion* effect, not a ranking effect. Any future
+   claim that bridges improve ranking must be made at @1/@3.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.

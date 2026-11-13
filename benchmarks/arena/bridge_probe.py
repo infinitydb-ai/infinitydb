@@ -128,15 +128,32 @@ def witness_facts(db: InfinityDB, bridges: list[Bridge], top_k: int) -> list[str
     return out
 
 
-def recall_hit(result: dict, ev_texts: list[str]) -> float:
+def recall_hit(result: dict, ev_texts: list[str], k: int | None = None) -> float:
     """Fraction of evidence turns found, matching score.py rather than a
     binary any-hit: multi-hop questions carry several evidence turns, and
-    crediting a partial answer as a full one inflates the baseline."""
+    crediting a partial answer as a full one inflates the baseline.
+
+    ``k`` truncates the context first, which is what makes ordering matter:
+    ``score.evidence_hit`` joins the list into one blob, so at a fixed k the
+    metric is order-blind and a ranking change cannot move it.
+    """
     facts = render(result)
+    if k is not None:
+        facts = facts[:k]
     if not ev_texts or not facts:
         return 0.0
     value = score.evidence_hit(facts, ev_texts)
     return 0.0 if value != value else value  # nan -> 0.0
+
+
+KS = (1, 3, 10)
+
+
+def hit_at(facts: list[str], ev_texts: list[str], k: int) -> float:
+    if not ev_texts or not facts:
+        return 0.0
+    value = score.evidence_hit(facts[:k], ev_texts)
+    return 0.0 if value != value else value
 
 
 def main() -> int:
@@ -147,6 +164,9 @@ def main() -> int:
     ap.add_argument("--mode", default="scope", choices=("scope", "witness"),
                     help="scope: pass bridge objects as entity filters. "
                          "witness: quote the turns that asserted the edges instead.")
+    ap.add_argument("--position", default="bottom", choices=("bottom", "top"),
+                    help="where the quoted witnesses go; @10 is set-based and "
+                         "order-blind, so only @1 and @3 can move")
     ap.add_argument("--hops", type=int, default=2)
     ap.add_argument("--max-bridges", type=int, default=0,
                     help="override the selector's cap; each quoted witness displaces one recall slot")
@@ -169,6 +189,12 @@ def main() -> int:
 
     all_base: list[float] = []
     all_scoped: list[float] = []
+    # Per-k series, because @10 cannot see ordering: the same ten memories in a
+    # different order score identically. Only @1 and @3 can move with position.
+    per_k = {f"base@{k}": [] for k in KS}
+    per_k.update({f"arm@{k}": [] for k in KS})
+    fired_k = {f"base@{k}": [] for k in KS}
+    fired_k.update({f"arm@{k}": [] for k in KS})
     # Metrics restricted to questions the selector actually fired on, because an
     # overall delta diluted by hundreds of untouched questions says nothing
     # about whether the mechanism works where it applies.
@@ -190,11 +216,17 @@ def main() -> int:
             baseline = db.recall(qa.question, n=args.top_k, user_id=conv_id, now=now,
                                  reinforce=False, include_policies=False)
             base_hits.append(recall_hit(baseline, ev))
+            base_facts = render(baseline)
+            base_k = {k: hit_at(base_facts, ev, k) for k in KS}
+            for k in KS:
+                per_k[f"base@{k}"].append(base_k[k])
 
             entities = entities_in_question(db, qa.question, conv_id)
             bridges = selector.select(qa.question, candidates_for(db, entities, conv_id, args.hops))
             if not bridges:
                 scoped_hits.append(recall_hit(baseline, ev))
+                for k in KS:
+                    per_k[f"arm@{k}"].append(base_k[k])
                 continue
             bridge_count += 1
             if args.mode == "witness":
@@ -202,14 +234,25 @@ def main() -> int:
                 keep = max(1, args.top_k - len(witnesses))
                 base_result = db.recall(qa.question, n=keep, user_id=conv_id, now=now,
                                         reinforce=False, include_policies=False)
-                facts = render(base_result)[:keep] + witnesses
+                head = render(base_result)[:keep]
+                facts = witnesses + head if args.position == "top" else head + witnesses
                 value = score.evidence_hit(facts, ev)
                 scoped_hits.append(0.0 if value != value else value)
+                for k in KS:
+                    per_k[f"arm@{k}"].append(hit_at(facts, ev, k))
+                    fired_k[f"arm@{k}"].append(hit_at(facts, ev, k))
             else:
                 scoped = db.recall(qa.question, n=args.top_k, user_id=conv_id, now=now,
                                    reinforce=False, include_policies=False,
                                    entities=[b.object for b in bridges])
                 scoped_hits.append(recall_hit(scoped, ev))
+                arm_facts = render(scoped)
+                for k in KS:
+                    value = hit_at(arm_facts, ev, k)
+                    per_k[f"arm@{k}"].append(value)
+                    fired_k[f"arm@{k}"].append(value)
+            for k in KS:
+                fired_k[f"base@{k}"].append(base_k[k])
             fired_base.append(base_hits[-1])
             fired_scoped.append(scoped_hits[-1])
 
@@ -244,6 +287,14 @@ def main() -> int:
         fired_summary["delta"] = round(
             (sum(fired_scoped) - sum(fired_base)) / len(fired_base), 4)
     report["fired_subset"] = fired_summary
+    by_k = {"all": {key: round(sum(v) / len(v), 4) if v else None for key, v in per_k.items()},
+            "fired": {key: round(sum(v) / len(v), 4) if v else None for key, v in fired_k.items()}}
+    report["by_k"] = by_k
+    for label in ("all", "fired"):
+        row = by_k[label]
+        print(f"BY-K [{label}] " + " ".join(
+            f"@{k} {row[f'base@{k}']} -> {row[f'arm@{k}']}" for k in KS))
+    report["position"] = args.position
     print(f"FIRED SUBSET n={fired_summary['questions']} "
           f"baseline={fired_summary['baseline_recall@10']} arm={fired_summary['arm_recall@10']} "
           f"delta={fired_summary.get('delta')}")
