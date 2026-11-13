@@ -208,6 +208,42 @@ object Y in a way that answers this question"*, over the typed edges that
 already exist. Not a generative rewrite, not an LLM in the retrieval path — one
 bounded classifier with a cached verdict per (question, edge) pair.
 
+### Phase 2 scaffold, measured 2026-11-13 — **the mechanism, not just the gate, may be wrong**
+
+`infinitydb/bridge.py` defines the veto interface (`NullBridge`, `AllBridge`,
+`PredicateBridge`); `benchmarks/arena/bridge_probe.py` measures it. The harness
+first had to prove it measures the published quantity, and does: the null
+selector reproduces **multi-hop 0.4939 on n=281** exactly, after two corrections
+that were both my errors — a binary any-hit instead of the scorer's fractional
+evidence recall (which read 0.7544), and missing date rendering (which is what
+the adapter feeds a reader).
+
+With the harness validated, scoping recall to the selected bridge objects:
+
+| selector | multi-hop recall@10 | delta | questions with bridges |
+|---|---|---|---|
+| `null` (control) | 0.4939 | 0 | 0 |
+| `all` (accept every edge — the upper bound) | **0.2468** | −0.2471 | 281 of 281 |
+| `predicate` (aspect-matched, strict) | 0.4778 | −0.0161 | 1 of 31 on conv-26 |
+
+Two findings, both negative and both useful:
+
+1. **Accepting every bridge halves recall.** The upper bound of "use the bridge
+   objects as an entity scope" is not a ceiling above the baseline — it is far
+   below it. This reproduces the teardown's OR-the-terms failure at the object
+   level (0.4484 before), and rules out the mechanism as a win, not just the
+   deterministic gate.
+2. **The strict gate fires almost never.** On conv-26 it fired once in 31
+   questions; its apparent +0.032 there was a single question, which is why
+   running all ten conversations mattered. Over the full set it is −0.0161.
+
+**Consequence for Phase 2:** a learned selector must not merely be more accurate
+than `PredicateBridge`; it must be accurate enough to approach the `null` result
+from a mechanism that loses 0.25 when its input is noisy. The next attempt should
+change *candidate generation* rather than filter bridges — e.g. retrieve the turn
+that witnessed the edge and quote it, instead of scoping by the object string —
+and this probe already provides the baseline and the controls to test that.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.
