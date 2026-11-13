@@ -1,0 +1,130 @@
+# Self-improvement: what can be built, and what cannot be claimed
+
+This document exists because "self-improving superintelligent memory" is a phrase
+that describes a research programme, not a feature, and because this repository
+has already retracted one claim it could not support
+([audit](BENCHMARK_INTEGRITY_AUDIT.md)). Every phase below has a **gate**: a
+number that must move, or the phase is published as a negative result and the
+code does not ship on by default.
+
+## What "self-improving" can honestly mean here
+
+Three mechanisms are real and implementable without a foundation model:
+
+1. **Learning a retrieval prior from outcomes.** A caller observes whether a
+   recalled memory was used. That is a label the engine cannot compute itself.
+2. **Learning which bridge is real** (multi-hop), which is the one place the
+   teardown concluded a model is required.
+3. **Consolidating memory over time** — merging, expiring and rewriting facts
+   as evidence accumulates, measured against a fixed token budget.
+
+What it cannot mean: the engine rewriting its own code, choosing its own
+objectives, or improving without measurement. Anything in that list is a
+different project with a different safety story, and calling it "superintelligent"
+would be marketing.
+
+## Phase 0 — feedback substrate (shipped, opt-in, unmeasured)
+
+Shipped in this repository:
+
+```python
+db.record_feedback("how do deploys run", atom_id, user_id="u", relevant=True)
+db.feedback_summary("u")          # events, relevant, irrelevant, precision
+db.learned_term_weights("u")      # inspectable term prior, needs 2 net votes
+db.learned_atom_weights("u")      # direct per-memory evidence, 1 vote is enough
+db.recall(q, user_id="u", learned_boost=1.0)
+db.clear_feedback("u")            # drops the signal, keeps every memory
+```
+
+Design constraints, each of which is a test in `tests/test_learning.py`:
+
+- **Append-only labels.** Feedback never edits a memory; a wrong label is offset
+  by later ones and the whole signal is removable.
+- **Bounded influence.** A prior is capped at `+3.0` on the term score and added
+  per matched atom, so a well-liked word cannot outrank a fact that answers the
+  question.
+- **Cannot rescue unrelated facts.** A memory sharing no content term with the
+  query stays unretrievable no matter how much feedback it has.
+- **Off by default.** `learned_boost=0` is the default and the arena never sets
+  it, so the published baseline is unchanged at 0.8101 (`dense=off n=1977`,
+  verified by `./scripts/verify.sh`).
+
+**Gate 0 (open):** there is no retrieval-quality number for this loop yet,
+because there is no real feedback corpus. It is a mechanism with tests, and the
+changelog says exactly that. Claiming a gain before Phase 1 runs would repeat the
+mistake this repository already paid for.
+
+## Phase 1 — offline policy fit, with an honest label simulation
+
+**Question:** does feedback-driven reweighting beat the fixed policy?
+
+**Method:** split LoCoMo by conversation (never by question) into fit and
+held-out halves. Simulate labels two ways and report both, because the first is
+an upper bound and the second is what a real caller can supply:
+
+- *Oracle labels* — retrieved evidence turned out to be gold evidence. This
+  cannot be obtained without gold answers, so it is an upper bound only.
+- *Heuristic labels* — answer-token overlap between the recalled memory and the
+  agent's response, no gold answer used. This is what a deployment can produce.
+
+Fit `learned_boost`, `min_support` and the term-prior cap on the fit half, then
+report held-out recall. **Gate 1:** held-out `evidence_recall@10` must improve
+by ≥0.01 absolute over 0.8101, with no category down by more than 0.005. Oracle
+improvement alone does not clear the gate; heuristic labels must also improve.
+
+**Expected outcome, stated in advance:** the honest prior is that this moves
+little, because the lexical ranking is already strong and feedback mostly
+re-orders near-ties. A null result is a publishable paragraph, not a failure.
+
+## Phase 2 — a learned bridge selector for multi-hop
+
+**Question:** can multi-hop move past 0.4939?
+
+The teardown records two deterministic failures (0.4484 with traversal terms,
+0.4863 with a compositional second pass) and names the cause: deciding whether a
+bridge is real is a classification problem, not a pattern-matching one.
+
+**Method:** a small model, called only to answer *"is entity X related to
+object Y in a way that answers this question"*, over the typed edges that
+already exist. Not a generative rewrite, not an LLM in the retrieval path — one
+bounded classifier with a cached verdict per (question, edge) pair.
+
+**Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
+inference cost recorded per question. Below the gate, the model stays out of the
+default path and the adapter ships behind a flag, if at all.
+
+## Phase 3 — pronoun coreference without a model
+
+**Question:** can "she moved to Lisbon" attach to the right person?
+
+Deterministic approach only: track speakers per session, and treat a pronoun as
+bound when a single same-session candidate of that gender exists, otherwise
+abstain. Precision over recall — a wrong supersession deletes a true fact, which
+is worse than missing one.
+
+**Gate 3:** on a hand-labelled fixture set committed with the change,
+precision ≥ 0.95 and abstention reported alongside accuracy. No LoCoMo claim is
+expected, since LoCoMo is first-person.
+
+## Phase 4 — consolidation under a token budget
+
+**Question:** can memory shrink without losing answers?
+
+Merge near-duplicate atoms, expire facts that were never recalled and never
+confirmed, and re-check that `budget_tokens=320` recall does not fall.
+**Gate 4:** ≤ 0.005 loss at `budget_tokens=320` (0.6958) while reducing stored
+atoms by ≥15%.
+
+## Rules that apply to every phase
+
+1. **Opt-in.** No phase changes a default without clearing its gate.
+2. **Measured or unclaimed.** If the number is not in an artifact, it does not
+   go in the README, the release notes or a pitch.
+3. **Negative results are published** with the same care as positive ones. The
+   experiment log in [`COMPETITIVE_TEARDOWN.md`](COMPETITIVE_TEARDOWN.md) is the
+   precedent: three measured-and-rejected ranking changes already cost nothing
+   in credibility and bought a lot.
+4. **Learning is data, not code.** Every learned artifact is a row you can read,
+   export and delete. Nothing self-modifies the engine.
+5. **Re-run the arena and `arena.py verify`** before quoting any number that a
+   phase could influence.
