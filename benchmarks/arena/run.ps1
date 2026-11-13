@@ -10,6 +10,8 @@ param(
     [int]$StressIterations = 100000,
     [switch]$SkipLongMemEval,
     [switch]$SkipScopedProbe,
+    [switch]$DownloadLoCoMo,
+    [switch]$ConfirmLoCoMoNonCommercial,
     [switch]$WithReader,
     [switch]$InstallDependencies,
     [switch]$Force
@@ -42,7 +44,17 @@ $PythonVersion = Get-PythonVersion -Python $BasePython
 if ($PythonVersion -lt [version]"3.10") { throw "Python 3.10+ is required; found $PythonVersion." }
 
 $Dataset = Join-Path $PSScriptRoot "data\locomo10.json"
-if (-not (Test-Path $Dataset)) { throw "LoCoMo dataset not found at '$Dataset'. See benchmarks/arena/README.md for dataset setup." }
+if (-not $ConfirmLoCoMoNonCommercial) {
+    throw "LoCoMo is licensed CC BY-NC 4.0. Confirm non-commercial use with -ConfirmLoCoMoNonCommercial, or obtain separate permission for commercial use."
+}
+if (-not (Test-Path $Dataset)) {
+    if (-not $DownloadLoCoMo) {
+        throw "LoCoMo dataset not found at '$Dataset'. Re-run with -DownloadLoCoMo only if your use complies with CC BY-NC 4.0."
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Dataset) | Out-Null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json" -OutFile $Dataset -UseBasicParsing
+}
 $Conversations = @("conv-26", "conv-30", "conv-41", "conv-42", "conv-43", "conv-44", "conv-47", "conv-48", "conv-49", "conv-50")
 $DatasetHash = (Get-FileHash -Algorithm SHA256 $Dataset).Hash.ToLowerInvariant()
 $RunStamp = Get-Date -Format "yyyyMMdd-HHmmss"
