@@ -230,9 +230,13 @@ incremental transcript capture. What is left:
 3. **Free-text contradiction detection (partly closed).** Same subject, same
    typed predicate and a different object now supersedes the older fact, as does
    opposite polarity of the same object; `contradictions()` returns the audit
-   trail and `as_of` keeps the history. What is still missing is the case with no
-   shared predicate at all ("I moved to Lisbon" vs "I live in Madrid" stated as
-   prose), which needs either a parser or a model.
+   trail and `as_of` keeps the history. First-person prose now works both ways ("I moved
+   to Lisbon" vs "I live in Madrid" both classify as `location`, so the newer
+   supersedes the older and `contradictions()` records it), and so does
+   third-person phrasing about the store's subject ("User relocated to Berlin"
+   vs "User is based in Munich"). What is still missing is pronoun coreference
+   across turns ("she moved to Lisbon" in a two-person transcript) and a
+   subject-less statement, both of which need either a parser or a model.
 4. **Profile compaction (shipped, unclaimed).** `persona_summary()` distils the
    resolved persona into one paragraph. It is a summary of already-resolved
    state, so it cannot invent a fact, but no retrieval-quality number is claimed
