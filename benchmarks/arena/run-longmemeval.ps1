@@ -3,7 +3,7 @@ param(
     [ValidateSet("infinitydb", "mem0", "hybrid")]
     [string[]]$Systems = @("infinitydb", "mem0", "hybrid"),
     [string]$DatasetPath = "benchmarks/arena/data/longmemeval_s_cleaned.json",
-    [ValidateRange(1, 500)]
+    [ValidateRange(0, 500)]
     [int]$Limit = 0,
     [ValidateRange(1, 50)]
     [int]$TopK = 5,
@@ -65,5 +65,7 @@ $Args = @(
 )
 if ($Limit -gt 0) { $Args += @("--limit", "$Limit") }
 if ($Force) { $Args += "--force" }
-Invoke-Native -File $Python -Arguments $Args
+$ArenaPython = $Python
+if ($NeedsEmbeddingEnv) { $ArenaPython = $Mem0Python }
+Invoke-Native -File $ArenaPython -Arguments $Args
 Write-Host "LongMemEval comparison complete. Results are under benchmarks/arena/results/longmemeval/." -ForegroundColor Green
