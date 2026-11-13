@@ -240,6 +240,119 @@ with `--no-reader` and the `qa_f1`/`gold_in_answer` columns stay at 0.
 Work directories under `.arena/` are disposable and git-ignored; the JSONL rows
 in `results/` are committed as evidence.
 
+## Windows PowerShell runner (Benchmark Arena v2)
+
+The original `run.sh` remains the Unix entry point. Native Windows users can
+run the same existing worker and scorer through `run.ps1`; it does not replace
+or rewrite any adapter.
+
+**Dataset licence gate:** the upstream LoCoMo dataset is CC BY-NC 4.0. Do not
+use it for commercial benchmarking, marketing or product claims unless you
+have separate permission. The runner requires an explicit non-commercial-use
+acknowledgement; it never downloads the dataset unless `-DownloadLoCoMo` is
+also supplied. The dataset is not committed to this repository. See the
+[upstream dataset](https://github.com/snap-research/locomo) and
+[CC BY-NC 4.0 terms](https://creativecommons.org/licenses/by-nc/4.0/).
+
+From the repository root in PowerShell:
+
+```powershell
+# Optional: allow this script in the current PowerShell process only
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# Fast local validation: dataset, scorer and real InfinityDB adapter
+.\benchmarks\arena\run.ps1 -Mode smoke
+
+# Full LoCoMo run: all 10 conversations, InfinityDB + mem0 + hybrid + TencentDB keyword
+# Installs pinned Python and Node dependencies into .arena and the Tencent harness.
+.\benchmarks\arena\run.ps1 -InstallDependencies
+
+# Python-only run if Node.js 22+ is not installed
+.\benchmarks\arena\run.ps1 -Systems infinitydb,mem0,hybrid -InstallDependencies
+
+# Optional: enable a local Ollama reader for end-to-end QA metrics
+.\benchmarks\arena\run.ps1 -WithReader
+
+# Optional: raise the synthetic InfinityDB-only scale workload to 1M writes
+.\benchmarks\arena\run.ps1 -StressIterations 1000000
+```
+
+The Windows runner performs the following without Bash or WSL:
+
+1. Requires an explicit LoCoMo non-commercial-use acknowledgement, optionally downloads the official dataset, checks Python 3.10+, and records the dataset SHA-256.
+2. Compiles the arena Python modules and runs the selected real adapters over
+   all ten LoCoMo conversations. Completed JSONL files are reused unless
+   `-Force` is supplied.
+3. Runs TencentDB Agent Memory 1.0.3 through its actual Node FTS keyword path
+   (Node.js >=22), then invokes its separate evidence scorer. This is explicitly
+   keyword-only; no LLM extraction or vector branch is claimed.
+4. Scores the Python-worker systems with the existing scorer. Reader-model evaluation is off
+   by default; enable it only when Ollama and the configured model are ready.
+5. Runs the existing pooled-vs-isolated scoped-recall probe and a separate
+   synthetic InfinityDB scale test (100K writes by default). The synthetic
+   result is **not** a competitor score.
+6. Runs the full LongMemEval probe if
+   `benchmarks/arena/data/longmemeval_s.json` is present. The 278 MB dataset
+   is not committed; without it the runner records that this probe was skipped. LongMemEval is MIT-licensed; retain its attribution.
+7. Writes a Windows run manifest under `benchmarks/arena/results/scores/`
+   containing the dataset hash, OS, Python version, selected systems and probe
+   status. Raw per-question JSONL remains under `results/<system>/`.
+
+The non-commercial LoCoMo run compares InfinityDB, mem0 OSS in `infer=False`
+mode, the local BM25 + FastEmbed hybrid control, and TencentDB Agent Memory
+in its real FTS keyword-only mode. TencentDB runs through its separate pinned
+Node/TypeScript harness and is scored separately because it does not emit the
+Python worker JSONL schema. Its full extraction pipeline still needs a model
+endpoint. Graphiti is open source but its normal pipeline needs a graph backend
+and an LLM; it is not silently emulated or included in the no-credential
+leaderboard. See
+[the competitor playbook](../../docs/COMPETITOR_BENCHMARK_PLAYBOOK.md).
+
+For machines with 8 GB RAM, keep the default 100K synthetic workload initially.
+The 1M option is deliberately opt-in because memory and runtime depend on the
+host. FastEmbed downloads its embedding model on the first mem0/hybrid run.
+
+## LongMemEval-S commercial-use benchmark (Windows)
+
+LongMemEval is MIT-licensed and is the preferred dataset for commercial
+benchmark development. The comparable runner uses the cleaned S split
+(500 questions, approximately 265 MB) from the official Hugging Face dataset:
+https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned
+
+From PowerShell at the repository root:
+
+```powershell
+# First run a 10-question pilot; downloads the MIT-licensed dataset and installs
+# the pinned local embedding environments. Systems run sequentially.
+.\benchmarks\arena\run-longmemeval.ps1 -DownloadDataset -InstallDependencies -Limit 10
+
+# Resume the same run to complete all 500 questions per selected system.
+.\benchmarks\arena\run-longmemeval.ps1
+
+# Or run only InfinityDB if you want a dependency-light baseline first.
+.\benchmarks\arena\run-longmemeval.ps1 -Systems infinitydb -Limit 10
+```
+
+The LongMemEval-S runner currently compares three real adapters:
+InfinityDB, Mem0 OSS (`infer=False`, local FastEmbed) and BM25 + FastEmbed
+hybrid retrieval. It runs each question in an isolated store, uses the same
+top-K, attributes returned verbatim turns to their source sessions, and reports
+session recall on answerable questions separately from abstention questions.
+It also records answer-in-context, query latency, ingestion time and retrieved
+context size. No reader LLM or API credentials are used.
+
+Each system has a resumable JSONL file keyed by the dataset SHA-256 and top-K.
+The comparison JSON and per-system summaries are written to
+`benchmarks/arena/results/longmemeval/`. Run systems sequentially on Windows;
+first-time embedding model downloads can take time. On 8 GB machines, start
+with the 10-question pilot and check memory use before completing all 500.
+
+TencentDB's current adapter is specifically the LoCoMo FTS keyword harness; it
+is not included in the LongMemEval comparison until an equivalent LongMemEval
+adapter is added. Do not combine its LoCoMo score with LongMemEval results.
+The separate LongMemEval probe remains InfinityDB-only; use the three-system
+runner above for the comparable retrieval leaderboard.
+
 ## Limitations
 
 1. **Retrieval proxies, not answers.** `answer_in_context` says the gold tokens

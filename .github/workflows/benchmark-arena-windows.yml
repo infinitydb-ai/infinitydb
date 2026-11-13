@@ -1,0 +1,49 @@
+name: Benchmark Arena Windows validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "benchmarks/arena/**"
+      - "tests/test_arena_score.py"
+      - "tests/test_longmemeval_arena.py"
+      - ".github/workflows/benchmark-arena-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-validation:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Test benchmark scoring contracts
+        run: pytest -q tests/test_arena_score.py tests/test_longmemeval_arena.py
+      - name: Compile benchmark Python modules
+        run: python -m compileall -q benchmarks/arena
+      - name: Parse PowerShell runner
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          foreach ($file in @("benchmarks/arena/run.ps1", "benchmarks/arena/run-longmemeval.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              Write-Host "Parse errors in $file"
+              $errors | Format-List
+              exit 1
+            }
+          }
+          Write-Host "PowerShell syntax passed for both runners."

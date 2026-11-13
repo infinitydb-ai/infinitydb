@@ -83,4 +83,25 @@ class Mem0System(BaseSystem):
         return [item["memory"] for item in result.get("results", [])]
 
     def _close(self) -> None:
-        pass
+        memory = getattr(self, "memory", None)
+        if memory is None:
+            return
+        try:
+            close_memory = getattr(memory, "close", None)
+            if callable(close_memory):
+                close_memory()
+        finally:
+            # mem0ai 2.2.1 closes its SQLite history DB but leaves the owned
+            # embedded Qdrant client open. Explicitly close it so Windows can
+            # release storage.sqlite before the per-question temp directory
+            # is removed. Also close any provider HTTP clients when present.
+            owners = (
+                getattr(memory, "vector_store", None),
+                getattr(memory, "llm", None),
+                getattr(memory, "embedding_model", None),
+            )
+            for owner in owners:
+                client = getattr(owner, "client", None)
+                close_client = getattr(client, "close", None)
+                if callable(close_client):
+                    close_client()
