@@ -1,0 +1,84 @@
+{
+  "protocol": "within split, hyperparameters chosen on fit half only",
+  "system": "infinitydb",
+  "fit_conversations": [
+    "conv-26",
+    "conv-30",
+    "conv-41",
+    "conv-42",
+    "conv-43",
+    "conv-44",
+    "conv-47",
+    "conv-48",
+    "conv-49",
+    "conv-50"
+  ],
+  "heldout_conversations": [
+    "conv-26",
+    "conv-30",
+    "conv-41",
+    "conv-42",
+    "conv-43",
+    "conv-44",
+    "conv-47",
+    "conv-48",
+    "conv-49",
+    "conv-50"
+  ],
+  "labels": {
+    "oracle": {
+      "fit_labels": 11855,
+      "fit_positive": 1235,
+      "hyperparameters": {
+        "min_support": 1.0,
+        "boost": 1.0
+      },
+      "fit": {
+        "recall@1": 0.5827,
+        "recall@3": 0.7744
+      },
+      "heldout_baseline": {
+        "recall@1": 0.693,
+        "recall@3": 0.8421,
+        "recall@10": 0.9198
+      },
+      "heldout_learned": {
+        "recall@1": 0.6604,
+        "recall@3": 0.8346,
+        "recall@10": 0.9198
+      },
+      "delta": {
+        "recall@1": -0.0326,
+        "recall@3": -0.0075,
+        "recall@10": 0.0
+      }
+    },
+    "answer": {
+      "fit_labels": 11855,
+      "fit_positive": 796,
+      "hyperparameters": {
+        "min_support": 1.0,
+        "boost": 0.1
+      },
+      "fit": {
+        "recall@1": 0.5573,
+        "recall@3": 0.7167
+      },
+      "heldout_baseline": {
+        "recall@1": 0.693,
+        "recall@3": 0.8421,
+        "recall@10": 0.9198
+      },
+      "heldout_learned": {
+        "recall@1": 0.693,
+        "recall@3": 0.8434,
+        "recall@10": 0.9198
+      },
+      "delta": {
+        "recall@1": 0.0,
+        "recall@3": 0.0013,
+        "recall@10": 0.0
+      }
+    }
+  }
+}
