@@ -58,12 +58,41 @@ query: 'what do they do for work'
 claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp
 ```
 
-Or copy [`.mcp.json`](.mcp.json) into a project and open it. 10 tools, 7 lines of config,
+Or copy [`.mcp.json`](.mcp.json) into a project and open it. 13 tools, 7 lines of config,
 zero dependencies. See [docs/MCP_SERVER.md](docs/MCP_SERVER.md) for scopes and hosts.
 
 The benchmark table further down is checked by `./scripts/verify.sh`; `python
 benchmarks/arena/arena.py verify` re-derives the arena metrics from the committed
 per-question rows and fails if any of them disagree.
+
+---
+
+## What no other memory layer gives you
+
+A **portable, tamper-evident audit bundle**: every fact your agent remembered, with
+a proof hash, the digest of the passage it came from, and a hash chain over the
+whole record — exportable as JSON, verifiable offline by someone who does not trust
+you, on their machine, with no access to your database.
+
+```python
+from infinitydb import InfinityDB, audit
+
+db = InfinityDB("memory.db")
+bundle = audit.export_bundle(db, user_id="alice")   # self-contained JSON
+audit.verify_bundle(bundle)                          # -> {"ok": True, "checked": 42}
+audit.verify_bundle(bundle, anchor=recorded_digest)  # proves it hasn't changed since
+```
+
+Anchor the `digest` somewhere the operator cannot rewrite — a git commit, an
+append-only log, an email to the client — and a later bundle that no longer matches
+proves the record was edited or deleted. `erase_with_receipt()` does the same for
+deletion requests: it erases a tenant and returns a receipt naming the pre-erasure
+digest and per-layer counts.
+
+The guarantee is stated precisely, including its limit: an *anchored* bundle is
+edit- and deletion-evident; an unanchored one is self-consistent, and history
+rewritten before the first export is undetectable. Details, threat model and
+measured cost: [docs/AUDIT.md](docs/AUDIT.md).
 
 ---
 

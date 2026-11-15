@@ -2081,6 +2081,26 @@ class InfinityDB:
             "proof_available": True,
         }
 
+    def audit_records(self, user_id: str = "default") -> list[dict[str, Any]]:
+        """Every atom for one tenant with its proof row and source text.
+
+        Backs `infinitydb.audit.export_bundle`. Ordered by event time then id so
+        two exports of an unchanged store produce identical bundles.
+        """
+        cur = self.conn.execute(
+            """
+            SELECT a.id AS atom_id, a.fact, a.ts, p.hash, p.source_log_id,
+                   p.raw_snippet, p.char_start, p.char_end, l.raw
+            FROM l1_atoms a
+            LEFT JOIN l6_proof p ON p.atom_id = a.id
+            LEFT JOIN l0_logs l ON l.id = p.source_log_id
+            WHERE a.user_id = ?
+            ORDER BY a.ts ASC, a.id ASC
+            """,
+            (user_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
     def get_proof(self, atom_id: str) -> dict[str, Any] | None:
         """Retrieve provenance and cryptographically verify it against L0."""
         from infinitydb.core.proof import verify_proof

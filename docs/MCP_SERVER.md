@@ -16,16 +16,17 @@ Python 3.12.3, three runs on the same machine.
 |---|---|
 | third-party packages pulled in | **0** |
 | wheel size | **60.6 KB** (`infinitydb_ai-1.4.1-py3-none-any.whl`) |
-| cold start, spawn to valid `initialize` reply | **65–82 ms** |
-| `tools/list` | 0.1–0.2 ms, 4,099 bytes, 10 tools |
-| `add_memory` | p50 **1.3–1.8 ms**, max 8.1 ms |
-| `recall_memory` | p50 **1.9–2.5 ms**, max 3.3 ms |
+| cold start, spawn to valid `initialize` reply | **99–106 ms** warm cache, 263 ms on a cold page cache |
+| `tools/list` | 0.1–0.3 ms, 5,365 bytes, 13 tools |
+| `add_memory` | p50 **1.9–2.3 ms**, max 10.5 ms |
+| `recall_memory` | p50 **2.0–2.3 ms**, max 5.4 ms |
 | peak RSS of the server process | **19.8 MB** |
 | configuration | one `mcpServers` entry, 7 lines of JSON |
 
 Read the cold start as the host's per-session tax, not per-call: a host starts the
-process once and keeps it. The ~70 ms is Python plus SQLite import, so it is the
-floor for any Python MCP server, not something this implementation adds.
+process once and keeps it. Most of it is Python plus SQLite import, so it is close to
+the floor for any Python MCP server; the spread between 99 ms and 263 ms is the
+filesystem page cache, not the code.
 
 ### Friction that the numbers do not capture
 
@@ -162,6 +163,9 @@ row counts tell you immediately whether you are looking at the expected database
 | `verify_proof` | `atom_id` | SHA-256 provenance record linking a fact to its source text. |
 | `entity_graph` | `entity`, `user_id`, `hops`, `limit` | Follows typed relation edges (`works_at`, `lives_in`, `studied_at`, `likes`, `dislikes`) out of an entity. `hops: 2` also follows entities that share an object, so two people in one memory connect through a common workplace or place. |
 | `contradictions` | `user_id`, `limit` | Audit trail of superseded facts: what was replaced, by what, and when. Nothing is deleted, so `as_of` recall still returns the history. |
+| `audit_export` | `user_id`, `include_text` | Returns a tamper-evident bundle of every fact with its proof hash, source digest and hash chain. Hand it to a third party to verify offline. |
+| `audit_verify` | `bundle`, `anchor` | Re-derives every digest and the chain from the bundle alone. Pass `anchor` (a digest recorded earlier) to prove the record has not changed since. |
+| `erase_with_receipt` | `user_id`, `confirm` | Erases a tenant and returns a receipt with the pre-erasure digest and per-layer counts, for deletion evidence. |
 | `stats` | — | Counts per memory layer for the active database. |
 
 ## Auto-capture (push, not pull)
