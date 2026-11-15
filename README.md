@@ -22,7 +22,8 @@
 
 <p align="center">
   <b>Agents remember. Humans innovate.</b><br/>
-  MCP server included · LangChain, CrewAI and LlamaIndex adapters in <code>examples/</code><br/>
+  MCP server included · OpenAI Agents SDK, Google ADK, LangGraph and Claude integrations<br/>
+  <a href="docs/UNIVERSAL_AGENT_INTEGRATIONS.md">Universal agent integration guide</a><br/>
   <a href="https://github.com/infinitydb-ai/infinitydb">github.com/infinitydb-ai/infinitydb</a>
 </p>
 
