@@ -1,0 +1,81 @@
+{
+  "selector": "all",
+  "mode": "witness",
+  "hops": 2,
+  "top_k": 10,
+  "published_multi_hop_baseline": 0.4939,
+  "conversations": {
+    "conv-26": {
+      "questions": 31,
+      "baseline_recall@10": 0.5027,
+      "scoped_recall@10": 0.5,
+      "questions_with_bridges": 31
+    },
+    "conv-30": {
+      "questions": 11,
+      "baseline_recall@10": 0.4894,
+      "scoped_recall@10": 0.4742,
+      "questions_with_bridges": 10
+    },
+    "conv-41": {
+      "questions": 31,
+      "baseline_recall@10": 0.4941,
+      "scoped_recall@10": 0.4538,
+      "questions_with_bridges": 30
+    },
+    "conv-42": {
+      "questions": 37,
+      "baseline_recall@10": 0.4508,
+      "scoped_recall@10": 0.3611,
+      "questions_with_bridges": 37
+    },
+    "conv-43": {
+      "questions": 31,
+      "baseline_recall@10": 0.5873,
+      "scoped_recall@10": 0.613,
+      "questions_with_bridges": 31
+    },
+    "conv-44": {
+      "questions": 30,
+      "baseline_recall@10": 0.2747,
+      "scoped_recall@10": 0.2386,
+      "questions_with_bridges": 29
+    },
+    "conv-47": {
+      "questions": 20,
+      "baseline_recall@10": 0.5,
+      "scoped_recall@10": 0.475,
+      "questions_with_bridges": 19
+    },
+    "conv-48": {
+      "questions": 21,
+      "baseline_recall@10": 0.5833,
+      "scoped_recall@10": 0.5675,
+      "questions_with_bridges": 21
+    },
+    "conv-49": {
+      "questions": 37,
+      "baseline_recall@10": 0.5463,
+      "scoped_recall@10": 0.4502,
+      "questions_with_bridges": 37
+    },
+    "conv-50": {
+      "questions": 32,
+      "baseline_recall@10": 0.5286,
+      "scoped_recall@10": 0.4609,
+      "questions_with_bridges": 32
+    }
+  },
+  "overall": {
+    "questions": 281,
+    "baseline_recall@10": 0.4939,
+    "scoped_recall@10": 0.4524,
+    "delta": -0.0415
+  },
+  "fired_subset": {
+    "questions": 277,
+    "baseline_recall@10": 0.492,
+    "arm_recall@10": 0.4499,
+    "delta": -0.0421
+  }
+}

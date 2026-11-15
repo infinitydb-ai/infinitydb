@@ -19,6 +19,7 @@ Issues = "https://github.com/infinitydb-ai/infinitydb/issues"
 
 [project.scripts]
 infinitydb-mcp = "infinitydb.mcp_server:run_server"
+infinitydb-demo = "infinitydb.demo:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]

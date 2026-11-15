@@ -1,0 +1,37 @@
+{
+  "measured_at": "2026-11-15T10:21:15Z",
+  "platform": "Linux 6.1.102 x86_64",
+  "python": "3.12.3",
+  "rows": [
+    {
+      "facts_requested": 100,
+      "facts_in_bundle": 100,
+      "ingest_s": 0.439,
+      "export_ms": 3.2,
+      "verify_ms": 2.2,
+      "verify_ok": true,
+      "bundle_bytes": 53662,
+      "bytes_per_fact": 536.6
+    },
+    {
+      "facts_requested": 1000,
+      "facts_in_bundle": 1000,
+      "ingest_s": 2.101,
+      "export_ms": 24.3,
+      "verify_ms": 17.3,
+      "verify_ok": true,
+      "bundle_bytes": 534983,
+      "bytes_per_fact": 535.0
+    },
+    {
+      "facts_requested": 5000,
+      "facts_in_bundle": 5000,
+      "ingest_s": 3.419,
+      "export_ms": 125.6,
+      "verify_ms": 91.0,
+      "verify_ok": true,
+      "bundle_bytes": 2678215,
+      "bytes_per_fact": 535.6
+    }
+  ]
+}
