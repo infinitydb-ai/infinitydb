@@ -22,9 +22,13 @@ infinitydb-mcp = "infinitydb.mcp_server:run_server"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+openai = ["openai-agents"]
+google-adk = ["google-adk"]
+langgraph = ["langgraph", "langchain-core"]
+integrations = ["openai-agents", "google-adk", "langgraph", "langchain-core"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["infinitydb"]
+packages = ["infinitydb", "integrations"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
