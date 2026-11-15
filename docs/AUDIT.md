@@ -18,6 +18,33 @@ audit.verify_bundle(bundle)                          # -> {"ok": True, "checked"
 Over MCP the same thing is two tools: `audit_export` and `audit_verify`, plus
 `erase_with_receipt` for deletion evidence.
 
+## From the shell
+
+`pip install infinitydb-ai` installs `infinitydb-audit`; `python -m infinitydb.audit`
+is the same thing. No Python needed to run or check an export.
+
+```bash
+# 1. export — prints the digest you should anchor
+infinitydb-audit export --db memory.db --user alice --out alice-audit.json
+#    digest:     dff5faf5f17f77fc…
+#    chain_head: e01d5f6f14e163f1…
+
+# 2. hand the file over. They verify it on their machine, offline:
+infinitydb-audit verify alice-audit.json
+
+# 3. months later, prove nothing changed since you anchored it:
+infinitydb-audit verify alice-audit.json --anchor dff5faf5f17f77fc…
+
+# deletion evidence
+infinitydb-audit receipt --db memory.db --user alice --yes --out receipt.json
+infinitydb-audit verify-receipt receipt.json
+```
+
+Exit codes are the contract, so a shell script can branch on them without parsing
+text: **0** verified, **1** verification failed, **2** unusable input. `--json`
+prints the full failure report; `--no-text` exports digests without the facts;
+`receipt` refuses to run without `--yes`.
+
 ## What is in a bundle
 
 ```json

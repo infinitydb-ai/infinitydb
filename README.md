@@ -89,6 +89,9 @@ proves the record was edited or deleted. `erase_with_receipt()` does the same fo
 deletion requests: it erases a tenant and returns a receipt naming the pre-erasure
 digest and per-layer counts.
 
+From the shell, with no Python: `infinitydb-audit export --db memory.db --user
+alice --out audit.json`, then `infinitydb-audit verify audit.json [--anchor DIGEST]`.
+
 The guarantee is stated precisely, including its limit: an *anchored* bundle is
 edit- and deletion-evident; an unanchored one is self-consistent, and history
 rewritten before the first export is undetectable. Details, threat model and

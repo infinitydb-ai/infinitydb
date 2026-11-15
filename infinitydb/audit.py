@@ -192,3 +192,122 @@ def verify_receipt(receipt: dict[str, Any]) -> bool:
     """Check a receipt's own digest; it is the operator's signed-off claim."""
     payload = {key: value for key, value in receipt.items() if key != "digest"}
     return _sha256(payload) == receipt.get("digest")
+
+
+def _load_json(path: str) -> Any:
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _write_json(payload: dict[str, Any], path: str | None) -> None:
+    text = json.dumps(payload, indent=2) + "\n"
+    if path:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    else:
+        print(text, end="")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`infinitydb-audit` — export and verify bundles without writing Python.
+
+    Exit codes: 0 verified ok, 1 verification failed, 2 unusable input. A
+    verifier script can therefore branch on the exit status alone.
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="infinitydb-audit",
+        description="Export, verify and attest InfinityDB memory without touching the API.",
+    )
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    export = sub.add_parser("export", help="write an audit bundle for one user")
+    export.add_argument("--db", required=True, help="path to the SQLite memory file")
+    export.add_argument("--user", default="default")
+    export.add_argument("--out", default="", help="bundle path (default: stdout)")
+    export.add_argument("--no-text", action="store_true",
+                        help="export digests only, without fact text")
+
+    verify = sub.add_parser("verify", help="verify a bundle offline")
+    verify.add_argument("bundle", help="bundle JSON written by `export`")
+    verify.add_argument("--anchor", default="",
+                        help="digest recorded earlier; fails if the bundle no longer matches")
+    verify.add_argument("--json", action="store_true", help="print the full report")
+
+    receipt = sub.add_parser("receipt", help="erase a user and write a deletion receipt")
+    receipt.add_argument("--db", required=True)
+    receipt.add_argument("--user", default="default")
+    receipt.add_argument("--out", default="", help="receipt path (default: stdout)")
+    receipt.add_argument("--yes", action="store_true", help="required: confirms the erasure")
+
+    check = sub.add_parser("verify-receipt", help="check a receipt's own digest")
+    check.add_argument("receipt")
+
+    args = ap.parse_args(argv)
+
+    if args.command == "export":
+        from infinitydb.core.engine import InfinityDB
+
+        db = InfinityDB(args.db)
+        try:
+            bundle = export_bundle(db, user_id=args.user, include_text=not args.no_text)
+        finally:
+            db.close()
+        _write_json(bundle, args.out or None)
+        print(f"exported {bundle['count']} facts for {args.user!r}", flush=True)
+        print(f"digest:     {bundle['digest']}", flush=True)
+        print(f"chain_head: {bundle['chain_head']}", flush=True)
+        print("anchor the digest somewhere you do not control; without it only "
+              "internal consistency is proven.", flush=True)
+        return 0
+
+    if args.command == "verify":
+        try:
+            bundle = _load_json(args.bundle)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"cannot read bundle: {exc}")
+            return 2
+        report = verify_bundle(bundle, anchor=args.anchor or None)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            state = "PASS" if report["ok"] else "FAIL"
+            print(f"{state}: {report['checked']} records checked")
+            for failure in report["failures"]:
+                where = failure.get("atom_id") or failure.get("index")
+                print(f"  {failure['reason']}" + (f" at {where}" if where is not None else ""))
+            if report["anchor_checked"] is not None:
+                print(f"  anchor: {'matches' if report['anchor_checked'] else 'MISMATCH'}")
+        return 0 if report["ok"] else 1
+
+    if args.command == "receipt":
+        if not args.yes:
+            print("refusing to erase without --yes", flush=True)
+            return 2
+        from infinitydb.core.engine import InfinityDB
+
+        db = InfinityDB(args.db)
+        try:
+            result = erase_with_receipt(db, user_id=args.user, confirm=True)
+        finally:
+            db.close()
+        _write_json(result, args.out or None)
+        print(f"erased {result['atoms_erased']} facts for {args.user!r}", flush=True)
+        return 0
+
+    if args.command == "verify-receipt":
+        try:
+            result = _load_json(args.receipt)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"cannot read receipt: {exc}")
+            return 2
+        ok = verify_receipt(result)
+        print("PASS: receipt digest matches" if ok else "FAIL: receipt digest does not match")
+        return 0 if ok else 1
+
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
