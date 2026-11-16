@@ -43,6 +43,19 @@ model call and no network.
 
 <p align="center"><sub>Animated SVG, generated from an actual run by <code>scripts/make_demo_svg.py</code> — no GIF host, no screenshot drift. A test fails if it stops matching the demo.</sub></p>
 
+**Coming from mem0 or another memory layer?** Their export imports directly — no SDK,
+no emulation, no network:
+
+```bash
+infinitydb-migrate mem0-export.json --db memory.db --user alice --dry-run   # report only
+infinitydb-migrate mem0-export.json --db memory.db --user alice             # import
+```
+
+Handles mem0's `get_all()` JSON, generic JSON, JSONL chat logs and plain text; keeps
+`created_at` as event time, so temporal recall survives the move. Re-runs are idempotent.
+Formats, field mapping and what deliberately does *not* come across:
+[docs/MIGRATE.md](docs/MIGRATE.md).
+
 **Give the same memory to an agent over MCP** (Claude Code, Cursor, Windsurf), no clone needed:
 
 ```bash

@@ -21,6 +21,7 @@ Issues = "https://github.com/infinitydb-ai/infinitydb/issues"
 infinitydb-mcp = "infinitydb.mcp_server:run_server"
 infinitydb-demo = "infinitydb.demo:main"
 infinitydb-audit = "infinitydb.audit:main"
+infinitydb-migrate = "infinitydb.migrate:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
