@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="916" height="608" viewBox="0 0 916 608" role="img" aria-labelledby="t d">
+  <title id="t">InfinityDB demo: ingest three turns and recall facts, in memory, with no model calls</title>
+  <desc id="d">InfinityDB demo — in-memory, no model calls, no network
+  open       3.0 ms
+  ingest     4.2 ms  (3 turns)
+
+query: &#x27;where does the user live&#x27;
+  [1.056] I moved to Lisbon in March 2024 and I work as a data engineer at a ceramics studio
+  1 memory in 0.8 ms
+
+query: &#x27;what do they do for work&#x27;
+  [0.869] I work as a data engineer at a ceramics studio
+  [0.833] I moved to Lisbon in March 2024 and I work as a data engineer at a ceramics studio
+  2 memories in 0.6 ms
+
+query: &#x27;what is the budget&#x27;
+  [1.345] My budget for the new cluster is forty thousand euros
+  1 memory in 0.2 ms
+
+  stored  facts=4 proofs=4 backend=SQLite-WAL
+  recall  1.6 ms over 3 questions
+
+Next: give this to an agent over MCP —
+  claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 14px; white-space: pre; }
+    .ln { opacity: 1; animation: reveal 22s linear infinite both; }
+    .cursor { opacity: 0; animation: blink 1.05s steps(1) infinite; }
+    @keyframes reveal {
+      0% { opacity: 0; }
+      2% { opacity: 1; }
+      93% { opacity: 1; }
+      97%, 100% { opacity: 0; }
+    }
+    @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+      .ln { animation: none; opacity: 1; }
+      .cursor { animation: none; opacity: 1; }
+    }
+  </style>
+  <rect width="916" height="608" rx="10" fill="#0b0f14"/>
+  <rect width="916" height="44" rx="10" fill="#161d26"/>
+  <rect y="34" width="916" height="10" fill="#161d26"/>
+  <circle cx="22" cy="22" r="5.5" fill="#ff5f57"/>
+  <circle cx="42" cy="22" r="5.5" fill="#febc2e"/>
+  <circle cx="62" cy="22" r="5.5" fill="#28c840"/>
+  <text x="86" y="27" fill="#7d8fa3" font-size="12.5">python -m infinitydb.demo · Linux x86_64, python 3.12.3</text>
+  <text class="ln" x="26" y="74" fill="#fbbf24" style="animation-delay:0.3s">InfinityDB demo — in-memory, no model calls, no network</text>
+  <text class="ln" x="26" y="97" fill="#d7e2ee" style="animation-delay:0.85s">  open       3.0 ms</text>
+  <text class="ln" x="26" y="120" fill="#d7e2ee" style="animation-delay:1.4s">  ingest     4.2 ms  (3 turns)</text>
+  <text class="ln" x="26" y="143" fill="#d7e2ee" style="animation-delay:1.95s"> </text>
+  <text class="ln" x="26" y="166" fill="#5eead4" style="animation-delay:2.5s">query: &#x27;where does the user live&#x27;</text>
+  <text class="ln" x="26" y="189" fill="#d7e2ee" style="animation-delay:3.05s">  [1.056] I moved to Lisbon in March 2024 and I work as a data engineer at a ceramics studio</text>
+  <text class="ln" x="26" y="212" fill="#d7e2ee" style="animation-delay:3.6s">  1 memory in 0.8 ms</text>
+  <text class="ln" x="26" y="235" fill="#d7e2ee" style="animation-delay:4.15s"> </text>
+  <text class="ln" x="26" y="258" fill="#5eead4" style="animation-delay:4.7s">query: &#x27;what do they do for work&#x27;</text>
+  <text class="ln" x="26" y="281" fill="#d7e2ee" style="animation-delay:5.25s">  [0.869] I work as a data engineer at a ceramics studio</text>
+  <text class="ln" x="26" y="304" fill="#d7e2ee" style="animation-delay:5.8s">  [0.833] I moved to Lisbon in March 2024 and I work as a data engineer at a ceramics studio</text>
+  <text class="ln" x="26" y="327" fill="#d7e2ee" style="animation-delay:6.35s">  2 memories in 0.6 ms</text>
+  <text class="ln" x="26" y="350" fill="#d7e2ee" style="animation-delay:6.9s"> </text>
+  <text class="ln" x="26" y="373" fill="#5eead4" style="animation-delay:7.45s">query: &#x27;what is the budget&#x27;</text>
+  <text class="ln" x="26" y="396" fill="#d7e2ee" style="animation-delay:8.0s">  [1.345] My budget for the new cluster is forty thousand euros</text>
+  <text class="ln" x="26" y="419" fill="#d7e2ee" style="animation-delay:8.55s">  1 memory in 0.2 ms</text>
+  <text class="ln" x="26" y="442" fill="#d7e2ee" style="animation-delay:9.1s"> </text>
+  <text class="ln" x="26" y="465" fill="#d7e2ee" style="animation-delay:9.65s">  stored  facts=4 proofs=4 backend=SQLite-WAL</text>
+  <text class="ln" x="26" y="488" fill="#d7e2ee" style="animation-delay:10.2s">  recall  1.6 ms over 3 questions</text>
+  <text class="ln" x="26" y="511" fill="#d7e2ee" style="animation-delay:10.75s"> </text>
+  <text class="ln" x="26" y="534" fill="#7d8fa3" style="animation-delay:11.3s">Next: give this to an agent over MCP —</text>
+  <text class="ln" x="26" y="557" fill="#7d8fa3" style="animation-delay:11.85s">  claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp</text>
+  <rect class="cursor" x="26" y="568" width="9" height="16" fill="#5eead4" style="animation-delay:12.4s"/>
+</svg>

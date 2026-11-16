@@ -35,22 +35,13 @@ pip install infinitydb-ai && python -m infinitydb.demo
 ```
 
 That writes three turns, extracts facts, and answers three questions — in memory, with no
-model call and no network. Real output from that command on an 8-vCPU CPU-only host:
+model call and no network.
 
-```text
-InfinityDB demo — in-memory, no model calls, no network
-  open       3.9 ms
-  ingest     4.6 ms  (3 turns)
+<p align="center">
+  <img src="assets/demo.svg" alt="Terminal session: python -m infinitydb.demo prints ingest timings, then answers 'where does the user live', 'what do they do for work' and 'what is the budget' with the extracted facts, then shows stored facts, proofs, backend and total recall time." width="820"/>
+</p>
 
-query: 'where does the user live'
-  [1.056] I moved to Lisbon in March 2024 and I work as a data engineer at a ceramics studio
-
-query: 'what do they do for work'
-  [0.869] I work as a data engineer at a ceramics studio
-
-  stored  facts=4 proofs=4 backend=SQLite-WAL
-  recall  1.9 ms over 3 questions
-```
+<p align="center"><sub>Animated SVG, generated from an actual run by <code>scripts/make_demo_svg.py</code> — no GIF host, no screenshot drift. A test fails if it stops matching the demo.</sub></p>
 
 **Give the same memory to an agent over MCP** (Claude Code, Cursor, Windsurf), no clone needed:
 

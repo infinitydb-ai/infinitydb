@@ -62,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{item.get('score', 0):.3f}] {fact}")
         if not hits:
             print("  (nothing above threshold)")
-        print(f"  {len(hits)} memories in {elapsed:.1f} ms")
+        noun = "memory" if len(hits) == 1 else "memories"
+        print(f"  {len(hits)} {noun} in {elapsed:.1f} ms")
         print()
 
     stats = db.stats()
