@@ -1,0 +1,100 @@
+{
+  "selector": "broad",
+  "mode": "witness",
+  "hops": 2,
+  "top_k": 10,
+  "published_multi_hop_baseline": 0.4939,
+  "conversations": {
+    "conv-26": {
+      "questions": 31,
+      "baseline_recall@10": 0.5027,
+      "scoped_recall@10": 0.5188,
+      "questions_with_bridges": 5
+    },
+    "conv-30": {
+      "questions": 11,
+      "baseline_recall@10": 0.4894,
+      "scoped_recall@10": 0.4894,
+      "questions_with_bridges": 2
+    },
+    "conv-41": {
+      "questions": 31,
+      "baseline_recall@10": 0.4941,
+      "scoped_recall@10": 0.4941,
+      "questions_with_bridges": 2
+    },
+    "conv-42": {
+      "questions": 37,
+      "baseline_recall@10": 0.4508,
+      "scoped_recall@10": 0.4508,
+      "questions_with_bridges": 5
+    },
+    "conv-43": {
+      "questions": 31,
+      "baseline_recall@10": 0.5873,
+      "scoped_recall@10": 0.6034,
+      "questions_with_bridges": 7
+    },
+    "conv-44": {
+      "questions": 30,
+      "baseline_recall@10": 0.2747,
+      "scoped_recall@10": 0.2831,
+      "questions_with_bridges": 4
+    },
+    "conv-47": {
+      "questions": 20,
+      "baseline_recall@10": 0.5,
+      "scoped_recall@10": 0.5,
+      "questions_with_bridges": 3
+    },
+    "conv-48": {
+      "questions": 21,
+      "baseline_recall@10": 0.5833,
+      "scoped_recall@10": 0.5929,
+      "questions_with_bridges": 5
+    },
+    "conv-49": {
+      "questions": 37,
+      "baseline_recall@10": 0.5463,
+      "scoped_recall@10": 0.5396,
+      "questions_with_bridges": 8
+    },
+    "conv-50": {
+      "questions": 32,
+      "baseline_recall@10": 0.5286,
+      "scoped_recall@10": 0.5443,
+      "questions_with_bridges": 8
+    }
+  },
+  "overall": {
+    "questions": 281,
+    "baseline_recall@10": 0.4939,
+    "scoped_recall@10": 0.5,
+    "delta": 0.0061
+  },
+  "fired_subset": {
+    "questions": 49,
+    "baseline_recall@10": 0.3682,
+    "arm_recall@10": 0.4029,
+    "delta": 0.0347
+  },
+  "by_k": {
+    "all": {
+      "base@1": 0.175,
+      "base@3": 0.3181,
+      "base@10": 0.4939,
+      "arm@1": 0.1517,
+      "arm@3": 0.2881,
+      "arm@10": 0.5
+    },
+    "fired": {
+      "base@1": 0.1488,
+      "base@3": 0.2747,
+      "base@10": 0.3682,
+      "arm@1": 0.0153,
+      "arm@3": 0.1027,
+      "arm@10": 0.4029
+    }
+  },
+  "position": "top"
+}

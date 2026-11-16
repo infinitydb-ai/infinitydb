@@ -28,6 +28,81 @@
 
 ---
 
+## Try it in one command
+
+```bash
+pip install infinitydb-ai && python -m infinitydb.demo
+```
+
+That writes three turns, extracts facts, and answers three questions — in memory, with no
+model call and no network.
+
+<p align="center">
+  <img src="assets/demo.svg" alt="Terminal session: python -m infinitydb.demo prints ingest timings, then answers 'where does the user live', 'what do they do for work' and 'what is the budget' with the extracted facts, then shows stored facts, proofs, backend and total recall time." width="820"/>
+</p>
+
+<p align="center"><sub>Animated SVG, generated from an actual run by <code>scripts/make_demo_svg.py</code> — no GIF host, no screenshot drift. A test fails if it stops matching the demo.</sub></p>
+
+**Coming from mem0 or another memory layer?** Their export imports directly — no SDK,
+no emulation, no network:
+
+```bash
+infinitydb-migrate mem0-export.json --db memory.db --user alice --dry-run   # report only
+infinitydb-migrate mem0-export.json --db memory.db --user alice             # import
+```
+
+Handles mem0's `get_all()` JSON, generic JSON, JSONL chat logs and plain text; keeps
+`created_at` as event time, so temporal recall survives the move. Re-runs are idempotent.
+Formats, field mapping and what deliberately does *not* come across:
+[docs/MIGRATE.md](docs/MIGRATE.md).
+
+**Give the same memory to an agent over MCP** (Claude Code, Cursor, Windsurf), no clone needed:
+
+```bash
+claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp
+```
+
+Or copy [`.mcp.json`](.mcp.json) into a project and open it. 13 tools, 7 lines of config,
+zero dependencies. See [docs/MCP_SERVER.md](docs/MCP_SERVER.md) for scopes and hosts.
+
+The benchmark table further down is checked by `./scripts/verify.sh`; `python
+benchmarks/arena/arena.py verify` re-derives the arena metrics from the committed
+per-question rows and fails if any of them disagree.
+
+---
+
+## What no other memory layer gives you
+
+A **portable, tamper-evident audit bundle**: every fact your agent remembered, with
+a proof hash, the digest of the passage it came from, and a hash chain over the
+whole record — exportable as JSON, verifiable offline by someone who does not trust
+you, on their machine, with no access to your database.
+
+```python
+from infinitydb import InfinityDB, audit
+
+db = InfinityDB("memory.db")
+bundle = audit.export_bundle(db, user_id="alice")   # self-contained JSON
+audit.verify_bundle(bundle)                          # -> {"ok": True, "checked": 42}
+audit.verify_bundle(bundle, anchor=recorded_digest)  # proves it hasn't changed since
+```
+
+Anchor the `digest` somewhere the operator cannot rewrite — a git commit, an
+append-only log, an email to the client — and a later bundle that no longer matches
+proves the record was edited or deleted. `erase_with_receipt()` does the same for
+deletion requests: it erases a tenant and returns a receipt naming the pre-erasure
+digest and per-layer counts.
+
+From the shell, with no Python: `infinitydb-audit export --db memory.db --user
+alice --out audit.json`, then `infinitydb-audit verify audit.json [--anchor DIGEST]`.
+
+The guarantee is stated precisely, including its limit: an *anchored* bundle is
+edit- and deletion-evident; an unanchored one is self-consistent, and history
+rewritten before the first export is undetectable. Details, threat model and
+measured cost: [docs/AUDIT.md](docs/AUDIT.md).
+
+---
+
 ## Why InfinityDB
 
 Most memory systems compress history into an opaque vector pile. When recall fails, you are left guessing. InfinityDB builds a structured, verifiable semantic pyramid.
@@ -152,6 +227,7 @@ is not, and the known gaps ranked — is in [docs/DILIGENCE.md](docs/DILIGENCE.m
 ### Python
 ```bash
 pip install infinitydb-ai
+python -m infinitydb.demo    # writes 3 turns, answers 3 questions, exits
 ```
 
 Local development:
