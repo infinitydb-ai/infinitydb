@@ -420,6 +420,43 @@ path is untouched. The API is covered by `tests/test_bridge_additive.py`
 deduplicate); the harness numbers above were produced by the probe, not by this
 entry point, and the two should be reconciled before any release note quotes them.
 
+### Phase 2l — the frontier, closed at matched cost, measured 2026-11-18 — **new chunking dominates at every token level measured**
+
+Phase 2k left one number standing: old chunking with 20 slots reached 0.8795 at 1,852
+tokens, above anything the new defaults produced. That was the gap. It is closed by
+measuring the whole curve rather than single points, because a frontier is a curve and
+the previous comparison picked one point on each.
+
+| arm | slots | recall | median tokens | recall / 1k tokens |
+|---|---|---|---|---|
+| new chunking, `budget_tokens=1200` | 10 | 0.8496 | 1170 | **0.726** |
+| new chunking, `budget_tokens=1500` | 10 | 0.8642 | 1392 | 0.621 |
+| **new chunking, `n=10`** | 10 | **0.8729** | 1426 | 0.612 |
+| old chunking, `n=16` | 16 | 0.8676 | 1497 | 0.580 |
+| **new chunking, `n=12`** | 12 | **0.8841** | **1659** | 0.533 |
+| old chunking, `n=20` | 20 | 0.8795 | 1852 | 0.475 |
+| new chunking, `n=14` | 14 | 0.8922 | 1900 | 0.470 |
+
+**The gap is closed on its own terms.** 12 slots of the new chunking beat 20 slots of
+the old one — 0.8841 against 0.8795 — while spending 193 fewer tokens and 8 fewer
+slots. At every measured token level from 1,170 upward, the new chunking is at or above
+the old chunking, and its recall-per-token is higher at every point but the last.
+
+Two things this does **not** mean, and they belong in the same paragraph as the win:
+
+- **It is not a `k=10` improvement.** The 0.8841 row is recall over 12 returned
+  memories. The `k=10` number is still 0.8729, and quoting the 12-slot figure as "@10"
+  would be the same accounting error Phase 2k was written to prevent.
+- **It is not a per-token breakthrough in the sense 2k asked for.** The mechanism is
+  the same one: more usable turns per slot. What changed is that the *frontier* moved —
+  the same quality now costs less context, and more quality now fits in the same
+  context.
+
+Practical consequence, and the only default-worthy statement here: a caller who wants
+the quality that previously required 20 memories should ask for 12. That is a docs
+recommendation, not a default change — the shape of the API does not need to move for
+this, which is why nothing in the engine changed in this phase.
+
 ### Phase 2k — the cost-matched frontier, measured 2026-11-18 — **the gain is largely context, and the docs now say so**
 
 Phases 2i–2j moved evidence_recall@10 from 0.780 to 0.8480 while median returned
