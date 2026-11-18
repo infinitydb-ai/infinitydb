@@ -4,13 +4,15 @@ Python (`from infinitydb import InfinityDB`):
 
 - `add(conversation, user_id="default", session_id=None, importance=0.9, ts=None, auto_supersede=True, extractor=None)` — store a conversation or log. `ts` is the event time (Unix seconds) used for decay, `as_of` recall and ordering.
   - `extractor` — optional callable `extractor(text) -> [fact, ...]` for model-written facts (an LLM, a tagger, a batch job). Each item is a dict with `fact` and optional `category` (lowercase snake_case), `importance` (0–1). Extracted facts keep an L6 provenance row; a paraphrase that does not occur verbatim is recorded with `char_start = -1`. Errors raised by the extractor propagate — a provider outage is not silently an empty conversation. Default `None`: fully deterministic, offline ingestion.
-- `recall(query, n=5, user_id=None, include_policies=True, as_of=None, now=None, reinforce=True, turn_windows=True, budget_tokens=None, expansion=0.15, rerank=None, session_id=None, entities=None)` — retrieve memories.
+- `recall(query, n=5, user_id=None, include_policies=True, as_of=None, now=None, reinforce=True, turn_windows=True, budget_tokens=None, token_counter=None, pack_fragments=False, expansion=0.15, rerank=None, session_id=None, entities=None)` — retrieve memories.
   - `n` — maximum number of memories.
   - `user_id` — tenant scope; `None` searches all users.
   - `as_of` / `now` — evaluate retrieval and decay at a point in time.
   - `reinforce` — update access counts of returned memories.
   - `turn_windows` — score each dialogue turn together with its neighbours and merge adjacent hits (default). `False` scores stored atoms on their own text.
-  - `budget_tokens` — pack the highest-ranked memories until this many words are returned; at least one memory is always returned. Use it to hold prompt cost constant.
+  - `budget_tokens` — pack the highest-ranked memories until this many units are returned; at least one memory is always returned. Use it to hold prompt cost constant.
+  - `token_counter` — optional `text -> int` callable used to count the budget (for example a BPE tokenizer). Default `None` counts words, so a caller who measures tokens sees the budget grow by ~1.24×; pass the same counter you measure with to keep it honest.
+  - `pack_fragments` — with `budget_tokens`, split merged turn chunks into individual turns before packing, so the budget buys many small slots instead of two or three large chunks. Opt-in and off by default because it measured **worse** on evidence recall than packing whole chunks at the same token cost (67.70% vs 69.07% at ~409 tokens on four LoCoMo conversations); it only wins on the token-overlap proxies, which reward short contexts. With `n` slots, budgets larger than `n` turns are not spent — raise `n` for a larger prompt.
   - `expansion` — weight (0–1) for light pseudo-relevance feedback: strong terms from the best three chunks are added to the query so paraphrases ("job" for "work") still match. Default `0.15`; `0` scores the query words alone.
   - `rerank` — optional callable `rerank(query, passages) -> list[float]` applied to the merged turn chunks, e.g. a cross-encoder. The core stays dependency-free: on LoCoMo a `ms-marco-MiniLM-L-6` reranker added ~1% relative recall for ~14× the latency, so it is off by default.
   - `session_id` — restrict retrieval to one session/project/conversation. Corpus statistics (document frequencies, average length) are computed *inside* the scope, so a scoped query ranks exactly as it would against a database holding only that session.

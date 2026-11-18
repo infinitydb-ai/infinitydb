@@ -45,6 +45,11 @@ PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
 PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
     --engines infinitydb --max-convos 4 --max-qa 500 --top-k 10 \
     --budget-tokens 250 300 350 400 420
+
+# split merged chunks into individual turns before packing (measured worse)
+PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
+    --engines infinitydb --max-convos 4 --max-qa 500 --top-k 10 \
+    --fragment-budget --budget-tokens 340 419 600
 ```
 
 It reads the copy of `locomo10.json` already vendored for the arena, so a run
@@ -127,15 +132,59 @@ cannot recover it at Mem0's cost. The mechanism is visible in the table: a
 350-word budget returns 2.8 merged chunks where `k=10` returns 10, so each
 returned snippet has to justify several turns and retrieval gets fewer
 independent chances to contain the cited one. `budget_tokens` is enforced as a
-*word* budget inside `recall`, which is why measured tiktoken tokens run about
-1.24x the setting (420 → 521); the token column above is the measurement, and it
-is what the comparison uses, never the setting.
+*word* budget inside `recall` by default, which is why measured tiktoken tokens
+run about 1.24x the setting (420 → 521) in that artifact; the token column above
+is the measurement, and it is what the comparison uses, never the setting. That
+run predates `recall(token_counter=...)`, which now lets the harness pass its own
+tokenizer so the budget is real BPE tokens — the next section measures that way.
 
 Two more readings from the same table, both unflattering and both left in:
 budget enforcement *trades* recall for cost rather than compressing it —
 containment falls with the budget too, so shortening the context does not raise
 precision — and no budget setting reaches Mem0's answer-level F1 at any token
 count, which is the long-context penalty the unbudgeted row already paid.
+
+### Turn-level packing at a matched budget: measured, and it does not beat Mem0
+
+The obvious fix for the loss above is to stop packing whole chunks: split the
+top ten chunks back into their turns, score each turn against the query, and
+pack ten small turns into the same ~419 tokens. That is now
+`recall(..., pack_fragments=True)` / `--fragment-budget`, and it was measured
+rather than assumed. The same run passes the harness's `tiktoken` counter to
+`recall(token_counter=...)`, so the budget is now **real BPE tokens** — the
+420 → 521 drift in the table above is gone
+([locomo-fragment-pack-results.json](locomo-fragment-pack-results.json)):
+
+| setting (~409–419 tokens) | items | tokens/question | evidence recall@10 | containment | token-overlap F1 |
+| --- | --- | --- | --- | --- | --- |
+| whole chunks, `budget_tokens=419` | 2.61 | 408.9 | **69.07%** | 26.88% | 4.31% |
+| split turns, `budget_tokens=419` | 9.96 | 409.7 | 67.70% | 27.05% | 14.05% |
+| split turns, `budget_tokens=340` | 9.57 | 383.6 | 66.84% | 27.05% | 14.12% |
+| split turns, `budget_tokens=600` | 10.00 | 414.6 | 67.87% | 27.40% | 13.94% |
+| unbudgeted `k=10` | 9.98 | 1,748 | 87.97% | 33.56% | 5.48% |
+| Mem0 `infer=False` | 10 requested | 418.7 | **74.40%** | 29.28% | **14.44%** |
+
+Giving the packer ten independent slots **does not** recover the gap: at
+`n=10` and ~410 tokens, splitting turns scores 67.70% against whole chunks'
+69.07% and Mem0's 74.40%. Whole windows stay ahead because an evidence turn is
+often a *neighbour* inside the winning window rather than that window's
+best-scoring turn, so per-turn selection throws away the context that carried
+the hit; and the turn scores here are lexical, where Mem0's are `gte-large`
+cosine similarities on single turns — the granularity Mem0 is best at, on the
+metric that rewards it.
+
+One methodological result is worth keeping: the token-overlap F1 column jumps
+from 4.31% to 14.05%, essentially Mem0's 14.44%, while evidence recall gets
+*worse*. Matching Mem0's F1 at Mem0's token count is a property of returning
+short single turns, not of answering better — which is why that column is
+labelled a proxy everywhere in this file.
+
+Limitations stated with the numbers: `pack_fragments` is capped at `n` items,
+so at `n=10` a budget above ten turns is not spent (600 and 900 both return
+414.6 tokens); the selection is deterministic lexical scoring inside the top
+`n` chunks, so no model is involved on either side; and the row is opt-in
+because a measured-worse mode must not become the default for existing
+`budget_tokens` callers.
 
 The Ollama-backed rows (`mem0_local`, `cognee_local`) were not measured here:
 this host has no Ollama and no model weights, so a row for them would be

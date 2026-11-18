@@ -818,6 +818,54 @@ def test_recall_budget_tokens_packs_ranked_memories_and_always_returns_one():
             db.recall("garden", user_id="budget", budget_tokens=bad)  # type: ignore[arg-type]
 
 
+def test_recall_pack_fragments_splits_turn_chunks_within_the_budget():
+    """Opt-in turn packing returns whole turns, never a merged chunk."""
+    db = InfinityDB()
+    t0 = 1_700_000_000.0
+    db.add(
+        "Caroline: I planted tomatoes in the garden on Saturday.\n"
+        "Melanie: The basil went in beside them the same afternoon.",
+        user_id="frag",
+        ts=t0,
+    )
+    db.add(
+        "Caroline: My sister visited the museum in town last week.",
+        user_id="frag",
+        ts=t0 + 60,
+    )
+
+    whole = db.recall("tomatoes garden", n=4, user_id="frag", budget_tokens=8)
+    split = db.recall(
+        "tomatoes garden", n=4, user_id="frag", budget_tokens=8, pack_fragments=True
+    )
+
+    assert any("\n" in item["fact"] for item in whole["results"])
+    assert split["results"]
+    assert all(item.get("fragment") for item in split["results"])
+    assert all("\n" not in item["fact"] for item in split["results"])
+    assert len(split["results"]) >= len(whole["results"])
+
+    # Real token counts can be supplied instead of the default word count.
+    counted = db.recall(
+        "tomatoes garden",
+        n=4,
+        user_id="frag",
+        budget_tokens=12,
+        token_counter=lambda text: 12,
+        pack_fragments=True,
+    )
+    assert len(counted["results"]) <= 1
+
+    for bad in (1, "yes", None.__class__):
+        if isinstance(bad, bool):
+            continue
+        with pytest.raises(TypeError, match="pack_fragments"):
+            db.recall("garden", user_id="frag", pack_fragments=bad)  # type: ignore[arg-type]
+
+    db.delete_user("frag")
+    assert db.stats()["l1_turn_windows"] == 0
+
+
 def test_recall_validates_expansion_and_finds_paraphrased_vocabulary():
     db = InfinityDB()
     db.add(
