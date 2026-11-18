@@ -3,6 +3,7 @@
 
 Compares InfinityDB against optionally-installed local baselines:
 
+* ``mem0_nollm``     Mem0 OSS with ``infer=False``: no LLM, FastEmbed + local Qdrant
 * ``mem0_local``     Mem0 with an Ollama LLM + Ollama embedder + local Qdrant
 * ``cognee_local``   Cognee with Ollama LLM + embeddings
 * ``tencentdb_local`` a TencentDB-style flat vector baseline (local pgvector DSN,
@@ -339,6 +340,90 @@ class Mem0LocalAdapter(MemoryAdapter):
         items = res.get("results", res) if isinstance(res, dict) else res
         facts = [m["memory"] for m in items or [] if isinstance(m, dict) and "memory" in m]
         return facts, elapsed_ms
+
+
+class Mem0NoLlmAdapter(MemoryAdapter):
+    """Mem0 OSS in its documented ``infer=False`` mode: no LLM anywhere.
+
+    Each turn is stored as written, embedded locally with FastEmbed, and
+    retrieved by cosine similarity from an on-disk Qdrant collection. This is
+    the only Mem0 configuration that is comparable to a zero-LLM write path;
+    ``mem0_local`` (Ollama extraction) is a different product behaviour and is
+    measured separately.
+
+    mem0 is imported lazily, so its dependencies stay optional. Install the
+    arena's pinned set (``benchmarks/arena/requirements-mem0.txt``) in a venv
+    that also has this repository on ``PYTHONPATH``.
+    """
+
+    name = "mem0_nollm"
+    embed_model = os.environ.get("MEM0_EMBED_MODEL", "thenlper/gte-large")
+    embed_dims = int(os.environ.get("MEM0_EMBED_DIMS", "1024"))
+
+    def __init__(self, workdir: str) -> None:
+        try:
+            from mem0 import Memory
+        except ImportError as exc:
+            raise RuntimeError(
+                "Install mem0's arena pins (`pip install -r benchmarks/arena/requirements-mem0.txt`) "
+                "in a venv to run mem0_nollm."
+            ) from exc
+
+        qdrant_path = os.path.join(workdir, "qdrant")
+        os.makedirs(qdrant_path, exist_ok=True)
+        config = {
+            # mem0's schema requires an llm block even when infer=False; this
+            # points at a closed port so an accidental call fails loudly.
+            "llm": {
+                "provider": "ollama",
+                "config": {
+                    "model": "unused-infer-false",
+                    "ollama_base_url": "http://127.0.0.1:1",
+                    "temperature": 0,
+                },
+            },
+            "embedder": {"provider": "fastembed", "config": {"model": self.embed_model}},
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "path": qdrant_path,
+                    "collection_name": "locomo_local",
+                    "embedding_model_dims": self.embed_dims,
+                    "on_disk": True,
+                },
+            },
+            "history_db_path": os.path.join(workdir, "mem0_history.db"),
+        }
+        self.memory = Memory.from_config(config)
+
+    def ingest_session(
+        self,
+        user_id: str,
+        session_id: str,
+        turns: list[dict[str, str]],
+        ts: float | None = None,
+    ) -> float:
+        # mem0 OSS rejects a ``timestamp`` argument, so the event date goes into
+        # the memory text, the same way InfinityDB's adapter renders it.
+        day = datetime.fromtimestamp(ts).strftime("%d %B %Y") if ts is not None else ""
+        t0 = time.perf_counter()
+        for turn in turns:
+            content = f"{turn['speaker']}: {turn['text']}"
+            self.memory.add(
+                [{"role": "user", "content": f"[{day}] {content}" if day else content}],
+                user_id=user_id,
+                infer=False,
+                metadata={"speaker": turn["speaker"]},
+            )
+        return (time.perf_counter() - t0) * 1000.0
+
+    def retrieve(self, user_id: str, query: str, limit: int = 5) -> tuple[list[str], float]:
+        t0 = time.perf_counter()
+        # mem0's kwarg is ``top_k``; ``limit`` is silently ignored and mem0 then
+        # returns its own default number of memories.
+        result = self.memory.search(query, filters={"user_id": user_id}, top_k=limit)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        return [item["memory"] for item in result.get("results", [])], elapsed_ms
 
 
 class CogneeLocalAdapter(MemoryAdapter):
@@ -751,6 +836,8 @@ def build_adapter(name: str, tmpdir: str, args: argparse.Namespace) -> MemoryAda
             embed_model=args.embed_model,
             ollama_url=args.ollama_url,
         )
+    if name == "mem0_nollm":
+        return Mem0NoLlmAdapter(os.path.join(tmpdir, "mem0_nollm"))
     if name == "cognee_local":
         return CogneeLocalAdapter(
             llm_model=args.llm_model,
@@ -768,7 +855,7 @@ def main() -> None:
         "--engines",
         nargs="+",
         default=["infinitydb"],
-        choices=["infinitydb", "mem0_local", "cognee_local", "tencentdb_local"],
+        choices=["infinitydb", "mem0_local", "mem0_nollm", "cognee_local", "tencentdb_local"],
     )
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--max-convos", type=int, default=3)

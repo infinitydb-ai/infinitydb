@@ -32,8 +32,10 @@ against, so at least one number exists on their metric. Read
 component local: no API keys and no hosted service. InfinityDB needs nothing
 beyond Python; the optional baseline adapters (Mem0 over local Ollama, Cognee
 over local Ollama, and a flat dense-vector baseline in a TencentDB-shaped table)
-are imported only when selected, and one whose dependency is missing is recorded
-under `skipped_engines` rather than aborting the run.
+are imported only when selected — including `mem0_nollm`, Mem0's `infer=False`
+mode, which is the one competitor row measurable with no LLM at all. An adapter
+whose dependency is missing is recorded under `skipped_engines` rather than
+aborting the run.
 
 ```bash
 PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
@@ -68,10 +70,37 @@ two are consistent but not identical populations. Latency here is higher than
 the arena's 13.11 ms p50 because one store holds all ten conversations and
 `top_k` is 10, where the arena gives each conversation its own database.
 
-No competitor row was measured in this environment: it has no Ollama and no
-model weights, so a Mem0 or Cognee row produced here would be fiction. The
-arena's Mem0 numbers come from its own pinned virtualenv (`arena/requirements-mem0.txt`);
-those are the ones to quote. The `tencentdb_local` adapter is a flat dense-vector
+### Measured comparison: zero-LLM write paths
+
+Both rows cover the same four conversations, 99 sessions and 584 questions at
+`k=10` (Mem0's CPU embedding of all ten conversations takes about eight minutes,
+past this host's per-command limit). One run each:
+
+| metric | InfinityDB | Mem0 OSS `infer=False` |
+| --- | --- | --- |
+| ingestion p50 / p99 per session | **32.9 / 74.7 ms** | 1,494 / 2,961 ms |
+| retrieval p50 / p99 | **15.7 / 48.2 ms** | 147.6 / 228.2 ms |
+| evidence recall@10 | **87.97%** | 74.40% |
+| retrieved tokens per question | 1,748 | **419** |
+| gold-answer containment | **33.56%** | 29.28% |
+| token-overlap F1 | 5.48% | **14.44%** |
+
+This is a trade, not a sweep. Mem0's `infer=False` mode stores each turn as
+written and embeds it with FastEmbed's `thenlper/gte-large` on CPU, so its write
+path is 45x slower here even with **no LLM at all**; a Mem0 configured with an
+Ollama extractor is a different, much slower mode that this host cannot run.
+InfinityDB's advantage is offset by context: ten returned slots mean ten merged
+turn chunks (1,748 tokens) against ten single turns (419), and at that size Mem0's
+short, precise contexts score better on answer-level F1. The equal-token control
+(the InfinityDB row with `budget_tokens` capped to ~420) has **not** been run in
+this harness, so no claim is made that the recall lead survives at matched
+context; the arena's equal-context table is the closest measurement we have.
+
+The Ollama-backed rows (`mem0_local`, `cognee_local`) were not measured here:
+this host has no Ollama and no model weights, so a row for them would be
+fiction. The arena's Mem0 numbers come from its own pinned virtualenv
+(`arena/requirements-mem0.txt`); those are the ones to quote for the shipped
+engine. The `tencentdb_local` adapter is a flat dense-vector
 baseline, not the TencentDB product, and the report names its backend
 (`pgvector` or `sqlite-flat-vector-emulation`).
 
