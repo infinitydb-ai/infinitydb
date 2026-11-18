@@ -207,6 +207,9 @@ def main() -> int:
     ap.add_argument("--mode", default="scope", choices=("scope", "witness"),
                     help="scope: pass bridge objects as entity filters. "
                          "witness: quote the turns that asserted the edges instead.")
+    ap.add_argument("--compare-budget", action="store_true",
+                    help="also score plain retrieval with the same number of slots, "
+                         "so 'bridges help' can be separated from 'more context helps'")
     ap.add_argument("--extra-budget", action="store_true",
                     help="append witnesses on top of top_k instead of displacing retrieved turns")
     ap.add_argument("--rank", default="none", choices=("none", "overlap", "novelty"),
@@ -248,6 +251,7 @@ def main() -> int:
     # Metrics restricted to questions the selector actually fired on, because an
     # overall delta diluted by hundreds of untouched questions says nothing
     # about whether the mechanism works where it applies.
+    budget_hits: list[float] = []
     fired_base: list[float] = []
     fired_scoped: list[float] = []
 
@@ -297,6 +301,13 @@ def main() -> int:
                 facts = witnesses + head if args.position == "top" else head + witnesses
                 value = score.evidence_hit(facts, ev)
                 scoped_hits.append(0.0 if value != value else value)
+                if args.compare_budget:
+                    # Same number of slots, no bridges: the control that decides
+                    # whether the gain is the witness or just the extra context.
+                    wider = db.recall(qa.question, n=len(facts), user_id=conv_id, now=now,
+                                      reinforce=False, include_policies=False)
+                    budget_value = score.evidence_hit(render(wider), ev)
+                    budget_hits.append(0.0 if budget_value != budget_value else budget_value)
                 for k in KS:
                     per_k[f"arm@{k}"].append(hit_at(facts, ev, k))
                     fired_k[f"arm@{k}"].append(hit_at(facts, ev, k))
@@ -354,6 +365,17 @@ def main() -> int:
         print(f"BY-K [{label}] " + " ".join(
             f"@{k} {row[f'base@{k}']} -> {row[f'arm@{k}']}" for k in KS))
     report["position"] = args.position
+    if budget_hits:
+        budget_overall = round(sum(budget_hits) / len(budget_hits), 4)
+        report["budget_control"] = {
+            "questions": len(budget_hits),
+            "plain_retrieval_recall": budget_overall,
+            "bridges_recall": overall_scoped,
+            "delta_vs_plain": round(overall_scoped - budget_overall, 4),
+        }
+        print(f"BUDGET CONTROL n={len(budget_hits)} plain-retrieval={budget_overall} "
+              f"bridges={overall_scoped} "
+              f"delta={overall_scoped - budget_overall:+.4f}")
     print(f"FIRED SUBSET n={fired_summary['questions']} "
           f"baseline={fired_summary['baseline_recall@10']} arm={fired_summary['arm_recall@10']} "
           f"delta={fired_summary.get('delta')}")

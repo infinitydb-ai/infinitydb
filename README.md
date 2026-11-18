@@ -222,6 +222,18 @@ That runs the test suite, an engine smoke test, the published LoCoMo baseline, a
 the competitor readiness check. The full claim inventory — what is measured, what
 is not, and the known gaps ranked — is in [docs/DILIGENCE.md](docs/DILIGENCE.md).
 
+If you would rather audit an install than a source tree:
+
+```bash
+infinitydb-evidence              # demo, latency, audit, migration, MCP — PASS/FAIL on your machine
+infinitydb-evidence --with-arena  # recompute the benchmark table too
+```
+
+It exits non-zero when a check fails, and prints the project's known limits after the
+results — including the multi-hop result where plain retrieval beat our own mechanism.
+The objections worth raising, and which of them we cannot answer, are in
+[docs/OBJECTIONS.md](docs/OBJECTIONS.md).
+
 ## Installation
 
 ### Python
