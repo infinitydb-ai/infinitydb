@@ -297,8 +297,12 @@ def recall_with_bridges(
     on top of `top_k` rather than swapped in. A witness is a sentence the retriever
     missed; its damage is a sentence it had already found.
 
-    Opt-in by construction. Multi-hop @10 is 0.5167 against a 0.55 gate, so this is
-    not the default path and must not become one until the gate clears.
+    **Measured negative against an equal-slot baseline.** Appending witnesses uses
+    context slots; plain retrieval with the same number of slots scores 0.5714 on the
+    questions this fires on, against 0.5164 here (Phase 2g). The benefit is the extra
+    budget, not the witness. This exists as an inspection tool — it shows which edges
+    a memory contains and what asserted them — and should not be recommended as a
+    retrieval improvement. Opt-in by construction, and `recall()` is unchanged.
     """
     from infinitydb.bridge import SubjectBridge
 

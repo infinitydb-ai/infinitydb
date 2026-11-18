@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "infinitydb-ai"
-version = "1.4.1"
+version = "1.4.2"
 description = "InfinityDB - High-performance open-source agent memory engine"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,6 +22,7 @@ infinitydb-mcp = "infinitydb.mcp_server:run_server"
 infinitydb-demo = "infinitydb.demo:main"
 infinitydb-audit = "infinitydb.audit:main"
 infinitydb-migrate = "infinitydb.migrate:main"
+infinitydb-evidence = "infinitydb.evidence:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]

@@ -29,7 +29,7 @@ from infinitydb.core.engine import InfinityDB
 SERVER_NAME = "infinitydb"
 # Must match pyproject.toml: MCP hosts display this, and a stale value makes an
 # installed server look older than the package it came from.
-SERVER_VERSION = "1.4.1"
+SERVER_VERSION = "1.4.2"
 
 def default_db_path() -> str:
     """Absolute by default, in the same place `infinitydb.capture` writes.
