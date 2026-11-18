@@ -17,8 +17,11 @@ Measures, per engine:
 
 1. ingestion latency per session (P50 / P95 / P99 ms)
 2. retrieval latency per query (P50 / P95 / P99 ms)
-3. retrieved context tokens vs. the full-conversation baseline (token savings)
+3. retrieved items and context tokens vs. the full-conversation baseline
+   (token savings)
 4. context token-overlap F1, and optionally an Ollama answer + judge score
+5. for ``infinitydb``, the same row at each ``--budget-tokens`` value, so recall
+   can be compared with another system at a matched token cost
 
 The F1 column is overlap between retrieved text and the gold answer, not reader
 accuracy. Treat it as a relative signal only; reader accuracy needs the judge.
@@ -221,9 +224,15 @@ class InfinityDBAdapter(MemoryAdapter):
 
     name = "infinitydb"
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, budget_tokens: int | None = None) -> None:
         self.db = InfinityDB(db_path=db_path)
         self._now: float | None = None
+        # ``recall(budget_tokens=...)`` packs the highest-ranked memories into a
+        # word budget, so the same engine at different budgets is a different
+        # row on the recall/token curve. Label it as such.
+        self.budget_tokens = budget_tokens
+        if budget_tokens is not None:
+            self.name = f"infinitydb_budget_{budget_tokens}"
 
     def ingest_session(
         self,
@@ -261,6 +270,7 @@ class InfinityDBAdapter(MemoryAdapter):
             now=self._now,
             # Measuring must not mutate stored memories.
             reinforce=False,
+            budget_tokens=self.budget_tokens,
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         facts = []
@@ -651,6 +661,7 @@ class EngineMetrics:
     ingest_latencies_ms: list[float] = field(default_factory=list)
     recall_latencies_ms: list[float] = field(default_factory=list)
     retrieved_tokens_per_query: list[int] = field(default_factory=list)
+    returned_items_per_query: list[int] = field(default_factory=list)
     full_context_tokens_per_query: list[int] = field(default_factory=list)
     retrieval_f1_scores: list[float] = field(default_factory=list)
     retrieval_containment: list[float] = field(default_factory=list)
@@ -681,6 +692,11 @@ class EngineMetrics:
                 "mean": round(statistics.mean(self.recall_latencies_ms), 4) if self.recall_latencies_ms else 0.0,
             },
             "tokens": {
+                "mean_returned_items": round(
+                    statistics.mean(self.returned_items_per_query), 2
+                )
+                if self.returned_items_per_query
+                else 0.0,
                 "mean_full_context_tokens": round(avg_full, 1),
                 "mean_retrieved_tokens": round(avg_ret, 1),
                 "token_savings_pct": round(savings_pct, 2),
@@ -788,6 +804,9 @@ def evaluate_engine(
 
             metrics.recall_latencies_ms.append(recall_ms)
             metrics.retrieved_tokens_per_query.append(ret_tokens)
+            # Token budgets buy recall by returning fewer, larger snippets, so
+            # the item count has to be published beside the token count.
+            metrics.returned_items_per_query.append(len(facts))
             metrics.full_context_tokens_per_query.append(full_tokens)
             metrics.retrieval_f1_scores.append(ctx_f1)
             metrics.retrieval_containment.append(1.0 if contained else 0.0)
@@ -826,9 +845,15 @@ def evaluate_engine(
     return metrics
 
 
-def build_adapter(name: str, tmpdir: str, args: argparse.Namespace) -> MemoryAdapter:
+def build_adapter(
+    name: str,
+    tmpdir: str,
+    args: argparse.Namespace,
+    budget_tokens: int | None = None,
+) -> MemoryAdapter:
     if name == "infinitydb":
-        return InfinityDBAdapter(os.path.join(tmpdir, "infinity.db"))
+        suffix = f"_{budget_tokens}" if budget_tokens is not None else ""
+        return InfinityDBAdapter(os.path.join(tmpdir, f"infinity{suffix}.db"), budget_tokens)
     if name == "mem0_local":
         return Mem0LocalAdapter(
             storage_dir=os.path.join(tmpdir, "mem0_qdrant"),
@@ -864,6 +889,17 @@ def main() -> None:
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434")
     parser.add_argument("--llm-model", type=str, default="llama3.2:3b")
     parser.add_argument("--embed-model", type=str, default="nomic-embed-text")
+    parser.add_argument(
+        "--budget-tokens",
+        nargs="+",
+        type=int,
+        default=None,
+        help=(
+            "Run InfinityDB with recall(budget_tokens=N) for each N. The engine enforces "
+            "this as a word budget, so measured tiktoken tokens per question are reported "
+            "and must be compared against another system's measured tokens, not against N."
+        ),
+    )
     parser.add_argument("--use-local-judge", action="store_true")
     parser.add_argument(
         "--output",
@@ -888,15 +924,27 @@ def main() -> None:
     logs: dict[str, list[dict[str, Any]]] = {}
 
     with tempfile.TemporaryDirectory(prefix="infinitydb_local_bench_") as tmpdir:
+        # A budget sweep only makes sense for the engine that has a budget, so
+        # expand the InfinityDB row and leave the other engines at one run each.
+        runs: list[tuple[str, int | None]] = []
         for name in args.engines:
-            print(f"\n>>> Running local benchmark for: {name}")
+            if name == "infinitydb" and args.budget_tokens:
+                # Keep the unbudgeted row so the curve has a measured endpoint.
+                runs.append((name, None))
+                runs.extend((name, budget) for budget in args.budget_tokens)
+            else:
+                runs.append((name, None))
+
+        for name, budget in runs:
+            label = name if budget is None else f"{name} (budget_tokens={budget})"
+            print(f"\n>>> Running local benchmark for: {label}")
             try:
-                adapter = build_adapter(name, tmpdir, args)
+                adapter = build_adapter(name, tmpdir, args, budget)
             except Exception as exc:
                 if args.strict:
                     raise
-                print(f"    ! skipped {name}: {exc}", file=sys.stderr)
-                skipped.append({"engine": name, "reason": str(exc)})
+                print(f"    ! skipped {label}: {exc}", file=sys.stderr)
+                skipped.append({"engine": label, "reason": str(exc)})
                 continue
 
             try:
@@ -915,8 +963,10 @@ def main() -> None:
                 backend = getattr(adapter, "backend", None)
                 if backend:
                     summary["backend"] = backend
+                if budget is not None:
+                    summary["recall_budget_tokens"] = budget
                 summaries.append(summary)
-                logs[name] = res.per_question_logs
+                logs[adapter.name] = res.per_question_logs
                 print(json.dumps(summary, indent=2))
             finally:
                 adapter.close()
@@ -938,6 +988,7 @@ def main() -> None:
             "max_qa_per_convo": args.max_qa,
             "top_k": args.top_k,
             "category_5_excluded": True,
+            "recall_budget_tokens": args.budget_tokens,
         },
         "notes": [
             "evidence_recall_at_k_pct is the only accuracy column comparable to the LoCoMo arena rows.",
