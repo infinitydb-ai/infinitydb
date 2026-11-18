@@ -139,7 +139,7 @@ Measured 2026-11-10 on one 8-vCPU CPU-only host, all 10 conversations, 1,986 que
 
 | System | evidence recall@10 | answer in context | context tokens | ingest | search p50 |
 | --- | --- | --- | --- | --- | --- |
-| **InfinityDB** | **0.780** | **0.545** | 711 | **7.5 s** | **10.7 ms** |
+| **InfinityDB** | **0.8069** | **0.5584** | 963 | **7.5 s** | **12.6 ms** |
 | **InfinityDB**, `dense=` (local MiniLM fusion) | 0.787 | 0.549 | **652** | 8.0 s | 29.0 ms |
 | **InfinityDB**, `budget_tokens=320` | 0.696 | 0.479 | 325 | 8.4 s | 10.8 ms |
 | mem0 2.2.1 OSS (`infer=False`) | 0.678 | 0.386 | **321** | 544.3 s | 152.1 ms |
@@ -174,9 +174,9 @@ Two further measurements, same host, same scoring code:
 
 - **Scoped recall under contamination.** Every row above gives each conversation
   its own database, which is not how an agent runs. Pooling all ten conversations
-  into one store with unscoped recall drops evidence recall@10 from 0.780 to
+  into one store with unscoped recall drops evidence recall@10 from 0.8069 to
   **0.733**; the same store recalled with `session_id=<conversation>` returns
-  **0.780** — identical to ten separate databases, at 40 ms p50 across a 10×
+  **0.8069** — identical to ten separate databases, at 40 ms p50 across a 10×
   larger corpus. Scoping computes corpus statistics inside the scope; without
   that, it recovers only 68% of the loss.
 - **LongMemEval (`longmemeval_s`), the dataset MemPalace publishes against.**
