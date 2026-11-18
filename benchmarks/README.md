@@ -40,12 +40,17 @@ aborting the run.
 ```bash
 PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
     --engines infinitydb --max-convos 10 --max-qa 500 --top-k 10 --no-logs
+
+# same engine at several prompt budgets, for a recall-vs-token curve
+PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
+    --engines infinitydb --max-convos 4 --max-qa 500 --top-k 10 \
+    --budget-tokens 250 300 350 400 420
 ```
 
 It reads the copy of `locomo10.json` already vendored for the arena, so a run
 needs no network. Per engine it records ingestion latency per session, retrieval
-latency per query (p50/p95/p99), retrieved tokens against the full-conversation
-baseline, and three accuracy signals. Only `evidence_recall_at_k_pct` is
+latency per query (p50/p95/p99), retrieved items and tokens per query against the
+full-conversation baseline, and three accuracy signals. Only `evidence_recall_at_k_pct` is
 comparable to the arena's rows: it asks whether the retrieved context contains
 the dialogue turn LoCoMo cites as justification. `answer_contained_pct` and
 `context_token_overlap_f1_pct` are string tests against the gold answer — they
@@ -91,10 +96,46 @@ path is 45x slower here even with **no LLM at all**; a Mem0 configured with an
 Ollama extractor is a different, much slower mode that this host cannot run.
 InfinityDB's advantage is offset by context: ten returned slots mean ten merged
 turn chunks (1,748 tokens) against ten single turns (419), and at that size Mem0's
-short, precise contexts score better on answer-level F1. The equal-token control
-(the InfinityDB row with `budget_tokens` capped to ~420) has **not** been run in
-this harness, so no claim is made that the recall lead survives at matched
-context; the arena's equal-context table is the closest measurement we have.
+short, precise contexts score better on answer-level F1.
+
+### The equal-token control: the recall lead does not survive token matching
+
+`--budget-tokens N` re-runs the same engine with `recall(budget_tokens=N)`, the
+documented prompt-cost knob: highest-ranked memories are packed into a budget and
+the rest dropped, so a query receives fewer, larger snippets. Same four
+conversations, 99 sessions, 584 questions, `k=10`, one run
+([locomo-equal-token-results.json](locomo-equal-token-results.json),
+per-question logs included):
+
+| InfinityDB setting | returned items | tokens/question | evidence recall@10 | containment | token-overlap F1 |
+| --- | --- | --- | --- | --- | --- |
+| unbudgeted (`k=10`) | 9.98 | 1,748 | **87.97%** | 33.56% | 5.48% |
+| `budget_tokens=420` | 3.24 | 521 | 74.23% | 28.25% | 4.49% |
+| `budget_tokens=400` | 3.14 | 495 | 73.02% | 27.57% | 4.51% |
+| `budget_tokens=350` | 2.79 | 433 | 70.45% | 27.23% | 4.45% |
+| `budget_tokens=300` | 2.35 | 371 | 68.90% | 26.54% | 4.21% |
+| `budget_tokens=250` | 1.92 | 316 | 67.18% | 25.68% | 4.07% |
+| Mem0 `infer=False` (`top_k=10`) | 10 requested | 419 | **74.40%** | 29.28% | **14.44%** |
+
+The equal-token answer is **negative**, and it is the headline: at 433 tokens
+(3.3% above Mem0's 419) InfinityDB reaches **70.45% evidence recall against
+Mem0's 74.40%**, 3.95 points behind, and it needs **521 tokens, 24% more** to
+draw level (74.23% against 74.40%). Interpolating between the 371- and 433-token
+rows puts it near 70% at Mem0's exact footprint. So the +13.57-point lead at
+`k=10` is bought with 4.2x the context, not a free win, and the budget knob
+cannot recover it at Mem0's cost. The mechanism is visible in the table: a
+350-word budget returns 2.8 merged chunks where `k=10` returns 10, so each
+returned snippet has to justify several turns and retrieval gets fewer
+independent chances to contain the cited one. `budget_tokens` is enforced as a
+*word* budget inside `recall`, which is why measured tiktoken tokens run about
+1.24x the setting (420 → 521); the token column above is the measurement, and it
+is what the comparison uses, never the setting.
+
+Two more readings from the same table, both unflattering and both left in:
+budget enforcement *trades* recall for cost rather than compressing it —
+containment falls with the budget too, so shortening the context does not raise
+precision — and no budget setting reaches Mem0's answer-level F1 at any token
+count, which is the long-context penalty the unbudgeted row already paid.
 
 The Ollama-backed rows (`mem0_local`, `cognee_local`) were not measured here:
 this host has no Ollama and no model weights, so a row for them would be
