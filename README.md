@@ -133,6 +133,8 @@ Limits: the update-tracking test only uses facts the built-in rules can parse ("
 
 ## Benchmark status
 
+Every number below has a script behind it. Every clause of the project brief — including the ones that are **not** built yet, such as the Rust core, the ONNX models and the background consolidation workers — is tracked in [docs/SPEC_CONFORMANCE.md](docs/SPEC_CONFORMANCE.md), which is the page to read before believing any performance sentence on this one.
+
 A reproducible head-to-head harness now runs **actual memory systems** on the public LoCoMo dataset, with pinned versions and per-question raw outputs: see [benchmarks/arena](benchmarks/arena/README.md). It replaces the earlier architecture emulators, which must not be read as product comparisons.
 
 Measured 2026-11-10 on one 8-vCPU CPU-only host, all 10 conversations, 1,986 questions, top-10 retrieval, no LLM at write or read time:

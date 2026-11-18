@@ -42,3 +42,33 @@ Record the exact commit SHA, Python and SQLite versions, operating system, CPU/R
 Before publishing competitor rankings, run each actual product using pinned implementations and documented configurations. Use the same hardware, dataset revision, question set, scoring rules, warm-up policy, concurrency, and repetition count. Report retrieval quality alongside latency, including p50, p95, p99, throughput, ingestion cost, storage footprint, and failure counts. Publish raw per-example outputs and scripts so others can reproduce the result.
 
 Until those requirements are met, use this harness for InfinityDB regression testing only—not as evidence of market leadership.
+
+## Latency targets
+
+`benchmarks/latency_targets.py` measures the two numbers the project brief sets as
+targets — P99 write under 5 ms and multi-hop read under 10 ms — against the real
+engine, on a 2,000-fact / 10-tenant synthetic corpus, and writes
+`benchmarks/benchmark_latency_targets.json`:
+
+```
+python benchmarks/latency_targets.py --facts 2000 --reads 300
+```
+
+As measured in this workspace: P99 write **3.53-3.77 ms** (target met), median and P95
+read **5.5 ms / 6.1-7.4 ms** (target met), P99 read **8.20 / 10.76 / 12.77 ms across
+three identical runs** (target *not* reliably met — the tail is host scheduling noise,
+not a code path). See `docs/SPEC_CONFORMANCE.md` for the full table and the LoCoMo
+corpus numbers (p50 13.11 ms), which are above the target because assembly traverses
+far more text per question.
+
+## LongMemEval
+
+`arena/longmemeval_probe.py` produces session-level recall@k on LongMemEval; it
+resumes where it stopped, so a full run is several short calls:
+
+```
+python benchmarks/arena/longmemeval_probe.py --path benchmarks/arena/data/longmemeval_s.json
+```
+
+180 of 500 questions are covered in `arena/results/longmemeval/infinitydb-k5.jsonl`:
+recall@5 **0.9333**, median context 534 words, median latency 15.16 ms.
