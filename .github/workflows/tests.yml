@@ -28,3 +28,36 @@ jobs:
       - run: npm install --prefix infinitydb-js
       - run: node infinitydb-js/test.js
 
+
+  # The wheel is the artifact users actually get. If a console script is missing
+  # from `[project.scripts]`, or its module is not packaged, every other job here
+  # still passes — the first person to notice is a user, after `pip install`.
+  wheel-entrypoints:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+      - name: Install it into a clean venv, offline, from the built wheel only
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install --no-index --find-links dist infinitydb-ai
+      - name: Every console script must exist in the venv
+        run: |
+          missing=0
+          for script in infinitydb-demo infinitydb-mcp infinitydb-audit infinitydb-migrate infinitydb-evidence; do
+            if [ -x "$RUNNER_TEMP/wheel-venv/bin/$script" ]; then
+              echo "ok $script"
+            else
+              echo "::error::console script not installed by the wheel: $script"
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - name: infinitydb-evidence must exit 0 from the installed wheel
+        run: "$RUNNER_TEMP/wheel-venv/bin/infinitydb-evidence"
