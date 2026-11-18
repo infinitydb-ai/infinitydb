@@ -23,13 +23,36 @@ import os
 import sys
 from typing import Any, Dict
 
+from infinitydb import audit
 from infinitydb.core.engine import InfinityDB
 
 SERVER_NAME = "infinitydb"
-SERVER_VERSION = "1.3.0"
+# Must match pyproject.toml: MCP hosts display this, and a stale value makes an
+# installed server look older than the package it came from.
+SERVER_VERSION = "1.4.1"
 
-DB_PATH = os.environ.get("INFINITYDB_PATH", "infinity_mcp.db")
-db = InfinityDB(DB_PATH)
+def default_db_path() -> str:
+    """Absolute by default, in the same place `infinitydb.capture` writes.
+
+    A relative default resolved against the host's working directory, which for
+    GUI hosts is somewhere the user never chose — and it meant auto-captured
+    turns landed in a different store than the one MCP read. Both now default to
+    ``~/.infinitydb/memory.db``; ``INFINITYDB_PATH`` still overrides, and a
+    relative path there is honoured deliberately, not by accident.
+    """
+    return os.environ.get("INFINITYDB_PATH") or os.path.expanduser("~/.infinitydb/memory.db")
+
+
+def open_db(path: str) -> InfinityDB:
+    if path != ":memory:":
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    return InfinityDB(path)
+
+
+DB_PATH = default_db_path()
+db = open_db(DB_PATH)
 
 TOOLS = [
     {
@@ -151,6 +174,54 @@ TOOLS = [
             "type": "object",
             "properties": {"atom_id": {"type": "string"}},
             "required": ["atom_id"],
+        },
+    },
+    {
+        "name": "audit_export",
+        "description": (
+            "Export this user's memory as a tamper-evident audit bundle: every fact "
+            "with its proof hash, source digest and a hash chain. Hand it to someone "
+            "who does not trust you; they can verify it offline with audit_verify."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "default": "default"},
+                "include_text": {
+                    "type": "boolean", "default": True,
+                    "description": "false exports digests only, no fact text.",
+                },
+            },
+        },
+    },
+    {
+        "name": "audit_verify",
+        "description": (
+            "Verify an audit bundle offline. Pass `anchor` (a digest recorded earlier, "
+            "e.g. in a git commit) to also prove the record has not changed since."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bundle": {"type": "object", "description": "The bundle from audit_export."},
+                "anchor": {"type": "string", "description": "Previously recorded digest."},
+            },
+            "required": ["bundle"],
+        },
+    },
+    {
+        "name": "erase_with_receipt",
+        "description": (
+            "Erase a user's memory and return a receipt naming the pre-erasure bundle "
+            "digest and per-layer deletion counts, for GDPR-style deletion evidence."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "default": "default"},
+                "confirm": {"type": "boolean", "default": False},
+            },
+            "required": ["confirm"],
         },
     },
     {
@@ -278,6 +349,35 @@ def handle_call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 "content": [{"type": "text", "text": "no proof record for that atom"}],
             }
         return _text(proof)
+
+    if name == "audit_export":
+        return _text(audit.export_bundle(
+            db,
+            user_id=str(arguments.get("user_id", "default")),
+            include_text=bool(arguments.get("include_text", True)),
+        ))
+
+    if name == "audit_verify":
+        bundle = arguments.get("bundle")
+        if isinstance(bundle, str):
+            try:
+                bundle = json.loads(bundle)
+            except json.JSONDecodeError as exc:
+                return {"isError": True,
+                        "content": [{"type": "text", "text": f"bundle is not JSON: {exc}"}]}
+        if not isinstance(bundle, dict):
+            return {"isError": True,
+                    "content": [{"type": "text", "text": "bundle must be an object"}]}
+        report = audit.verify_bundle(bundle, anchor=arguments.get("anchor"))
+        return _text(report) if report["ok"] else {
+            "isError": True, "content": [{"type": "text", "text": json.dumps(report)}]}
+
+    if name == "erase_with_receipt":
+        if not arguments.get("confirm"):
+            return {"isError": True,
+                    "content": [{"type": "text", "text": "pass confirm=true to erase"}]}
+        return _text(audit.erase_with_receipt(
+            db, user_id=str(arguments.get("user_id", "default")), confirm=True))
 
     if name == "entity_graph":
         paths = db.relations(

@@ -1,0 +1,32 @@
+{
+  "measured_at": "2026-11-15T10:21:16Z",
+  "platform": "Linux 6.1.102 x86_64",
+  "python": "3.12.3",
+  "install": {
+    "third_party_dependencies": 0,
+    "wheel_bytes": 60586,
+    "package_python_bytes": 175473
+  },
+  "startup": {
+    "spawn_to_initialize_ms": 262.9
+  },
+  "handshake": {
+    "tools_list_ms": 0.2,
+    "tools_list_bytes": 5365,
+    "tool_count": 13,
+    "server_version": "1.4.1"
+  },
+  "usage": {
+    "add_memory_ms_p50": 2.27,
+    "add_memory_ms_max": 6.79,
+    "recall_memory_ms_p50": 2.02,
+    "recall_memory_ms_max": 5.43,
+    "calls_measured": 20,
+    "process_max_rss_mb": 19.8,
+    "session_lifetime_s": 0.37
+  },
+  "config": {
+    "lines_of_json": 7,
+    "note": "one mcpServers entry: command, args, env"
+  }
+}
