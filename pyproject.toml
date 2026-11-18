@@ -26,6 +26,10 @@ infinitydb-evidence = "infinitydb.evidence:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Opt-in local semantic recall. The default install stays dependency-free; this
+# extra pulls ONNX Runtime through fastembed for a local embedder and
+# cross-encoder (no API key, no network call after the model download).
+onnx = ["fastembed>=0.6"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["infinitydb"]
