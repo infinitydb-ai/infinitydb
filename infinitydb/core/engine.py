@@ -164,6 +164,14 @@ def normalise_relative_dates(text: str, ts: float) -> str:
 # 2,000-fact store because the top-up pass no longer runs.
 _ASSEMBLY_DEPTH = 240
 
+# Turns a returned chunk may span. Neighbour windows are three turns, so 4 was the
+# smallest value that could express one window; a multi-hop answer often needs the
+# turn after that as well. Measured on LoCoMo @10: 4 -> 8 lifts multi-hop 0.5359 to
+# 0.5952 and every other category with it, for +30% median context (963 -> 1248
+# tokens). Callers who would rather pay tokens than answer quality can set
+# `budget_tokens` or pass a smaller `max_chunk_turns`.
+_MAX_CHUNK_TURNS = 8
+
 
 class InfinityDB:
     """InfinityDB L0-L6 Brain Engine.
@@ -1352,6 +1360,7 @@ class InfinityDB:
         entity_stems: list[set[str]] | None = None,
         dense: Any = None,
         assembly_depth: int | None = None,
+        max_chunk_turns: int = _MAX_CHUNK_TURNS,
     ) -> list[dict[str, Any]]:
         """Recall dialogue turns by scoring each turn inside its neighbour window.
 
@@ -1609,7 +1618,7 @@ class InfinityDB:
             for chunk in chunks:
                 if chunk["_session"] != item["_session"]:
                     continue
-                if chunk["_hi"] - chunk["_lo"] + 1 >= 4:
+                if chunk["_hi"] - chunk["_lo"] + 1 >= max_chunk_turns:
                     continue
                 if item["_seq"] == chunk["_hi"] + 1:
                     chunk["_hi"] = item["_seq"]
@@ -1876,6 +1885,7 @@ class InfinityDB:
         dense_weight: float = 1.0,
         learned_boost: float = 0.0,
         assembly_depth: int | None = None,
+        max_chunk_turns: int = _MAX_CHUNK_TURNS,
     ) -> dict[str, Any]:
         """Hybrid memory recall combining BM25 keyword matching, causal links,
 
@@ -2007,6 +2017,7 @@ class InfinityDB:
                 entity_stems=entity_stems,
                 dense=tuple(dense) if dense is not None else None,
                 assembly_depth=assembly_depth,
+                max_chunk_turns=max_chunk_turns,
             )
         if not top_k:
             top_k = self._recall_atoms(
