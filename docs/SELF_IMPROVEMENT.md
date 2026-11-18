@@ -361,6 +361,65 @@ Two findings:
    +0.0061 in Phase 2d is an *inclusion* effect, not a ranking effect. Any future
    claim that bridges improve ranking must be made at @1/@3.
 
+### Phase 2f — the loss was displacement, not bridge quality, measured 2026-11-18 — **best result so far, gate still open**
+
+Hypothesis stated before the run: *broad candidate generation plus overlap-ranking of
+witnesses lifts multi-hop @10 by ≥0.01.* The first half was wrong-edge; the run found
+something better.
+
+| arm | coverage | overall @10 | delta | fired-subset delta |
+|---|---|---|---|---|
+| broad gate, displaces (2d) | 17% | 0.5000 | +0.0061 | +0.0347 |
+| subject gate, displaces (2c) | 89% | 0.4685 | −0.0254 | −0.0287 |
+| subject + **overlap** ranking, displaces | 89% | 0.4553 | −0.0386 | −0.0436 |
+| subject + **novelty** ranking, displaces | 89% | 0.4452 | −0.0487 | −0.0550 |
+| subject, **additive**, cap 2 | 89% | 0.5037 | +0.0098 | +0.0110 |
+| subject, additive, cap 3 | 89% | 0.5078 | +0.0139 | +0.0157 |
+| subject, additive, cap 5 | 89% | 0.5136 | +0.0197 | +0.0222 |
+| **subject, additive, cap 8** | **89%** | **0.5167** | **+0.0228** | **+0.0257** |
+| broad, additive, cap 3 | 17% | 0.5017 | +0.0078 | +0.0449 |
+
+**Two ranking signals were tested and rejected.** Overlap with the question is
+*anti*-correlated with usefulness: a multi-hop question names the bridge entity, while
+the answering sentence names an entity the question does not contain. Inverting the
+signal (prefer novelty) was worse still. Read alone, that looks like "lexical signals
+cannot rank witnesses".
+
+**The follow-up isolates the real cause.** Every arm above spends one recall slot per
+witness, so a 10-slot context loses a retrieved turn for every sentence it gains.
+`--extra-budget` appends witnesses *after* the full top-10 instead. The same selector
+that lost 2.5 points at 89% coverage then **gains** them: +0.0139 at cap 3, rising
+monotonically to **+0.0228** at cap 8. So the previous negative results measured
+displacement, not bridge quality, and the ranking signals are not yet fairly tested —
+they were all measured with a confound that dominates them.
+
+**Gate status: not cleared.** 0.5167 against 0.55 leaves 0.033, and the curve is
+sublinear (+4 points per three extra witnesses between cap 5 and 8), so the next three
+witnesses will not close it. The cost is also real: eight extra sentences on top of ten
+retrieved turns is roughly +80% context, traded for +2.3 points.
+
+Two things this changes:
+
+1. **The mechanism to build is additive**, not filtering: bridges should extend the
+   evidence budget, because their value is a sentence the retriever missed, and their
+   damage is a sentence it had already found.
+2. **Ranking has to be re-measured under the additive budget** before anything is
+   concluded about lexical signals — with displacement removed, a good ranker has room
+   to show up, and a bad one can only cost the extra slots.
+
+Untested and stated as such: single-hop impact (the harness scores multi-hop only),
+token cost measured with a real tokenizer, and whether the curve saturates before it
+reaches the gate.
+
+**Shipped as opt-in, not as a default.** `infinitydb.bridge.recall_with_bridges(db,
+question, user_id=..., n=10, max_bridges=8)` returns the normal result with the
+witnesses appended and labelled `source: "bridge"`, plus the chosen edges. It is a
+library call, not a change to `recall()`: the gate is not cleared, so the default
+path is untouched. The API is covered by `tests/test_bridge_additive.py`
+(witnesses never replace a retrieved turn, the selector is respected, witnesses
+deduplicate); the harness numbers above were produced by the probe, not by this
+entry point, and the two should be reconciled before any release note quotes them.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.

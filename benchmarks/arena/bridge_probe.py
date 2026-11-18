@@ -128,6 +128,49 @@ def witness_facts(db: InfinityDB, bridges: list[Bridge], top_k: int) -> list[str
     return out
 
 
+STOPWORDS = set("""the a an of to in on at for and or but is are was were be been being do does
+did what where when who whom which how why user their they them i my me we you your it its this that
+there here about with from has have had can could would should""".split())
+
+
+def content_words(text: str) -> set[str]:
+    words = {w.strip(".,?!;:'\"()[]").lower() for w in text.split()}
+    return {w for w in words if len(w) > 2 and w not in STOPWORDS}
+
+
+def rank_bridges(db: InfinityDB, bridges: list[Bridge], question: str,
+                 mode: str = "overlap") -> list[Bridge]:
+    """Order candidate witnesses by how much of the question they actually cover.
+
+    Gating decides *whether* to use a bridge; this decides *which* one, which is
+    the part the earlier phases never varied. Ties break toward the shorter fact
+    (less surrounding noise) and then by atom id, so the order is deterministic.
+    """
+    asked = content_words(question)
+    if not asked:
+        return bridges
+    scored = []
+    for bridge in bridges:
+        row = None
+        if bridge.atom_id:
+            row = db.conn.execute(
+                "SELECT fact FROM l1_atoms WHERE id = ?", (bridge.atom_id,)
+            ).fetchone()
+        text = row["fact"] if row else f"{bridge.subject} {bridge.predicate} {bridge.object}"
+        words = content_words(text)
+        overlap = len(asked & words) / len(asked)
+        if mode == "novelty":
+            # Prefer the witness that introduces content the question does not
+            # contain: for multi-hop, the answering entity is usually absent from
+            # the question, so overlap ranks restatements first.
+            score = 1.0 - overlap
+        else:
+            score = overlap
+        scored.append((score, -len(words), bridge.atom_id, bridge))
+    scored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+    return [row[3] for row in scored]
+
+
 def recall_hit(result: dict, ev_texts: list[str], k: int | None = None) -> float:
     """Fraction of evidence turns found, matching score.py rather than a
     binary any-hit: multi-hop questions carry several evidence turns, and
@@ -164,6 +207,10 @@ def main() -> int:
     ap.add_argument("--mode", default="scope", choices=("scope", "witness"),
                     help="scope: pass bridge objects as entity filters. "
                          "witness: quote the turns that asserted the edges instead.")
+    ap.add_argument("--extra-budget", action="store_true",
+                    help="append witnesses on top of top_k instead of displacing retrieved turns")
+    ap.add_argument("--rank", default="none", choices=("none", "overlap", "novelty"),
+                    help="order candidate witnesses by question overlap before capping")
     ap.add_argument("--position", default="bottom", choices=("bottom", "top"),
                     help="where the quoted witnesses go; @10 is set-based and "
                          "order-blind, so only @1 and @3 can move")
@@ -175,12 +222,15 @@ def main() -> int:
     args = ap.parse_args()
 
     selector = SELECTORS[args.selector]()
+    cap_before = getattr(selector, "max_bridges", None)
     if args.max_bridges and hasattr(selector, "max_bridges"):
         selector.max_bridges = args.max_bridges
+        cap_before = args.max_bridges
     convo_map = {c.sample_id: c for c in locomo.load()}
     report: dict[str, object] = {
         "selector": selector.name,
         "mode": args.mode,
+        "rank": args.rank,
         "hops": args.hops,
         "top_k": args.top_k,
         "published_multi_hop_baseline": 0.4939,
@@ -222,7 +272,16 @@ def main() -> int:
                 per_k[f"base@{k}"].append(base_k[k])
 
             entities = entities_in_question(db, qa.question, conv_id)
-            bridges = selector.select(qa.question, candidates_for(db, entities, conv_id, args.hops))
+            candidates = candidates_for(db, entities, conv_id, args.hops)
+            if args.rank != "none" and hasattr(selector, "max_bridges"):
+                # Rank first, cap after: otherwise the selector discards the good
+                # witness before the ranker ever sees it.
+                selector.max_bridges = 10_000
+                bridge_candidates = selector.select(qa.question, candidates)
+                selector.max_bridges = cap_before
+                bridges = rank_bridges(db, bridge_candidates, qa.question, args.rank)[:args.max_bridges or 3]
+            else:
+                bridges = selector.select(qa.question, candidates)
             if not bridges:
                 scoped_hits.append(recall_hit(baseline, ev))
                 for k in KS:
@@ -231,7 +290,7 @@ def main() -> int:
             bridge_count += 1
             if args.mode == "witness":
                 witnesses = witness_facts(db, bridges, args.top_k)
-                keep = max(1, args.top_k - len(witnesses))
+                keep = args.top_k if args.extra_budget else max(1, args.top_k - len(witnesses))
                 base_result = db.recall(qa.question, n=keep, user_id=conv_id, now=now,
                                         reinforce=False, include_policies=False)
                 head = render(base_result)[:keep]

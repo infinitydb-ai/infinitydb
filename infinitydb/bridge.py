@@ -22,8 +22,9 @@ held-out multi-hop recall to justify its inference cost.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
 
 
 @dataclass(frozen=True)
@@ -227,5 +228,96 @@ class BroadPredicateBridge(PredicateBridge):
     }
 
 
+def entities_in_question(db: Any, question: str, user_id: str = "default") -> list[str]:
+    """Capitalised words in the question that are actually edge subjects here."""
+    words = {re.sub(r"'s$", "", word) for word in re.findall(r"[A-Za-z][A-Za-z'\-]+", question)
+             if word[:1].isupper()}
+    if not words:
+        return []
+    subjects = {row["subject"] for row in db.conn.execute(
+        "SELECT DISTINCT subject FROM l1_entity_edges WHERE user_id = ?", (user_id,))}
+    return sorted(word for word in words if word.lower() in subjects)
+
+
+def candidates(db: Any, question: str, user_id: str = "default", hops: int = 2) -> list[Bridge]:
+    """Every edge reachable from the people the question names."""
+    out: list[Bridge] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entity in entities_in_question(db, question, user_id):
+        for relation in db.relations(entity, user_id=user_id, hops=hops):
+            key = (relation["subject"], relation["predicate"], relation["object"])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(Bridge(
+                subject=relation["subject"],
+                predicate=relation["predicate"],
+                object=relation["object"],
+                atom_id=relation.get("atom_id", ""),
+                hops=relation.get("hop", 1),
+                direction=relation.get("direction", "out"),
+            ))
+    return out
+
+
+def witness_texts(db: Any, bridges: Sequence[Bridge], limit: int = 8) -> list[str]:
+    """The turns that asserted each edge, with the event date when we have it."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for bridge in bridges:
+        if not bridge.atom_id or bridge.atom_id in seen:
+            continue
+        seen.add(bridge.atom_id)
+        row = db.conn.execute("SELECT fact FROM l1_atoms WHERE id = ?", (bridge.atom_id,)).fetchone()
+        if row is None:
+            continue
+        text = " ".join(str(row["fact"]).split())
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def recall_with_bridges(
+    db: Any,
+    question: str,
+    *,
+    user_id: str = "default",
+    n: int = 10,
+    selector: BridgeSelector | None = None,
+    max_bridges: int = 8,
+    hops: int = 2,
+    **recall_kwargs: Any,
+) -> dict[str, Any]:
+    """Recall, then **append** bridge witnesses instead of spending slots on them.
+
+    Phase 2f measured what happens when witnesses replace retrieved turns: at 89%
+    coverage the same selector went from −0.0254 to +0.0228 once they were added
+    on top of `top_k` rather than swapped in. A witness is a sentence the retriever
+    missed; its damage is a sentence it had already found.
+
+    Opt-in by construction. Multi-hop @10 is 0.5167 against a 0.55 gate, so this is
+    not the default path and must not become one until the gate clears.
+    """
+    from infinitydb.bridge import SubjectBridge
+
+    chosen_selector = selector or SubjectBridge(max_bridges=max_bridges)
+    result = db.recall(question, n=n, user_id=user_id, **recall_kwargs)
+    picked = chosen_selector.select(
+        question, candidates(db, question, user_id=user_id, hops=hops))[:max_bridges]
+    witnesses = witness_texts(db, picked, limit=max_bridges)
+    extra = [{"fact": text, "score": 0.0, "source": "bridge"} for text in witnesses]
+    return {
+        **result,
+        "results": list(result.get("results", [])) + extra,
+        "bridges": [{"subject": b.subject, "predicate": b.predicate, "object": b.object,
+                     "hop": b.hops, "direction": b.direction} for b in picked[:len(witnesses)]],
+        "bridge_witnesses": witnesses,
+        "selector": chosen_selector.name,
+    }
+
+
 __all__ = ["AllBridge", "Bridge", "BridgeSelector", "BroadPredicateBridge", "NullBridge",
-           "PredicateBridge", "SubjectBridge"]
+           "PredicateBridge", "SubjectBridge", "candidates", "entities_in_question",
+           "recall_with_bridges", "witness_texts"]
