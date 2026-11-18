@@ -224,15 +224,23 @@ class InfinityDBAdapter(MemoryAdapter):
 
     name = "infinitydb"
 
-    def __init__(self, db_path: str, budget_tokens: int | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        budget_tokens: int | None = None,
+        fragments: bool = False,
+    ) -> None:
         self.db = InfinityDB(db_path=db_path)
         self._now: float | None = None
         # ``recall(budget_tokens=...)`` packs the highest-ranked memories into a
         # word budget, so the same engine at different budgets is a different
         # row on the recall/token curve. Label it as such.
         self.budget_tokens = budget_tokens
+        self.fragments = fragments
         if budget_tokens is not None:
             self.name = f"infinitydb_budget_{budget_tokens}"
+        if fragments:
+            self.name = f"infinitydb_fragments_budget_{budget_tokens}"
 
     def ingest_session(
         self,
@@ -271,6 +279,11 @@ class InfinityDBAdapter(MemoryAdapter):
             # Measuring must not mutate stored memories.
             reinforce=False,
             budget_tokens=self.budget_tokens,
+            # Give the engine the same tokenizer the harness measures with, so
+            # the budget is real BPE tokens rather than the engine's default
+            # word count (measured at ~1.24 words per token here).
+            token_counter=count_tokens if self.budget_tokens is not None else None,
+            pack_fragments=self.fragments,
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         facts = []
@@ -853,7 +866,13 @@ def build_adapter(
 ) -> MemoryAdapter:
     if name == "infinitydb":
         suffix = f"_{budget_tokens}" if budget_tokens is not None else ""
-        return InfinityDBAdapter(os.path.join(tmpdir, f"infinity{suffix}.db"), budget_tokens)
+        if getattr(args, "fragment_budget", False):
+            suffix += "_frag"
+        return InfinityDBAdapter(
+            os.path.join(tmpdir, f"infinity{suffix}.db"),
+            budget_tokens,
+            fragments=getattr(args, "fragment_budget", False),
+        )
     if name == "mem0_local":
         return Mem0LocalAdapter(
             storage_dir=os.path.join(tmpdir, "mem0_qdrant"),
@@ -895,9 +914,19 @@ def main() -> None:
         type=int,
         default=None,
         help=(
-            "Run InfinityDB with recall(budget_tokens=N) for each N. The engine enforces "
-            "this as a word budget, so measured tiktoken tokens per question are reported "
-            "and must be compared against another system's measured tokens, not against N."
+            "Run InfinityDB with recall(budget_tokens=N) for each N. The harness passes "
+            "its own tiktoken counter to recall(token_counter=...), so N is a real BPE "
+            "token budget; measured tokens per question still include the bullet and "
+            "date prefixes the harness adds when it renders memories."
+        ),
+    )
+    parser.add_argument(
+        "--fragment-budget",
+        action="store_true",
+        help=(
+            "With --budget-tokens, split merged turn chunks into their turns before "
+            "packing (recall(pack_fragments=True)). Measured worse on evidence recall "
+            "than packing whole chunks at the same token cost."
         ),
     )
     parser.add_argument("--use-local-judge", action="store_true")
@@ -989,6 +1018,7 @@ def main() -> None:
             "top_k": args.top_k,
             "category_5_excluded": True,
             "recall_budget_tokens": args.budget_tokens,
+            "pack_fragments": args.fragment_budget,
         },
         "notes": [
             "evidence_recall_at_k_pct is the only accuracy column comparable to the LoCoMo arena rows.",
