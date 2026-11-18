@@ -3,17 +3,17 @@
   "conv": "conv-49",
   "questions": 196,
   "answerable_questions": 156,
-  "ingest_seconds": 0.614,
+  "ingest_seconds": 0.937,
   "qa_f1": 0.0,
   "gold_in_answer": 0.0,
-  "answer_in_context": 0.4615,
-  "evidence_recall@k": 0.7045,
+  "answer_in_context": 0.4744,
+  "evidence_recall@k": 0.7361,
   "adversarial_refusal_rate": 0.0,
   "latency_ms": {
-    "p50": 10.47,
-    "p95": 13.58
+    "p50": 13.16,
+    "p95": 17.31
   },
-  "context_tokens_median": 727,
+  "context_tokens_median": 982,
   "errors": 0,
   "by_category": {
     "adversarial": {
@@ -28,14 +28,14 @@
       "f1": 0.0,
       "gold_in_answer": 0.0,
       "answer_in_context": 0.1622,
-      "evidence_recall@k": 0.5463
+      "evidence_recall@k": 0.5773
     },
     "open-domain": {
       "n": 13,
       "f1": 0.0,
       "gold_in_answer": 0.0,
       "answer_in_context": 0.1538,
-      "evidence_recall@k": 0.1243
+      "evidence_recall@k": 0.327
     },
     "single-hop": {
       "n": 73,
@@ -48,8 +48,8 @@
       "n": 33,
       "f1": 0.0,
       "gold_in_answer": 0.0,
-      "answer_in_context": 0.303,
-      "evidence_recall@k": 0.6768
+      "answer_in_context": 0.3636,
+      "evidence_recall@k": 0.7273
     }
   },
   "reader_model": null,

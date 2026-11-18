@@ -420,6 +420,55 @@ path is untouched. The API is covered by `tests/test_bridge_additive.py`
 deduplicate); the harness numbers above were produced by the probe, not by this
 entry point, and the two should be reconciled before any release note quotes them.
 
+### Phase 2i — assembly depth: the first change that beats plain retrieval at equal slots, measured 2026-11-18 — **positive**
+
+Gate 2b had survived four mechanisms. The fifth attempt started as MMR diversity and
+ended somewhere unexpected: **the diversity was irrelevant, and the ranking was
+truncating its own chunk assembly.**
+
+`_recall_turn_windows` merges adjacent turns into chunks, and only then returns `n`
+chunks. Chunk assembly traversed `3 * n` ranked items — 30 when a caller asks for 10.
+A chunk that owns one hop of a multi-hop question absorbs its neighbour, and that
+neighbour usually sits *below* position 30, so the shallow traversal never reached it.
+Separating the two numbers (`assembly_depth`) fixed a second problem with the same
+cause: when assembly yields fewer than `n` chunks the engine runs `_recall_atoms` again
+to top up the slots, so the shallow path was doing a *second full scoring pass*.
+
+| LoCoMo, `top_k=10`, 1,986 questions | previous default | depth 240 | delta |
+|---|---|---|---|
+| evidence_recall@10 | 0.780 | **0.8069** | **+0.0269** |
+| answer_in_context | 0.545 | **0.5584** | +0.0134 |
+| multi-hop | 0.4939 | **0.5359** | **+0.0420** |
+| single-hop | 0.9128 | 0.9326 | +0.0198 |
+| temporal | 0.7984 | 0.8281 | +0.0297 |
+| open-domain | 0.3557 | 0.4010 | +0.0452 |
+| adversarial | 0.9148 | 0.9327 | +0.0179 |
+| median context tokens | 711 | 963 | +35% |
+| p50 query latency | 10.7 ms | 12.6 ms | +1.9 ms |
+
+Every category improves; nothing regresses. Depth sweep on multi-hop: 60 → 0.5195,
+120 → 0.5287, 240 → 0.5359, 1000 → 0.5458 — monotone but flattening, and the cost of
+1000 is a longer assembly loop for no gain worth 0.01.
+
+**The honest cost is context, not CPU.** Median returned context grows 711 → 963
+tokens (+35%) because chunks carry their neighbours. At `k=10` that is the mechanism
+working as designed — the second hop arrives inside an existing slot — but it is a
+real increase in what the caller pays for, and it belongs next to the gain.
+
+Two lessons this phase produced, both about measurement rather than retrieval:
+
+1. **A parameter that changes nothing is a bug report.** λ=1.0 (pure relevance) beat
+   the diversity weighting, which is impossible unless `recall(n=10)` and
+   `recall(n=40)[:10]` disagree. Chasing that contradiction found the truncation.
+2. **The measured headline and the mechanism must be re-derived together.** Changing
+   a default is what makes a benchmark row stale, so the arena was re-run in full
+   rather than patching the number by hand; `arena.py verify` reproduces 0.8069 from
+   the committed rows.
+
+Tables in `DILIGENCE.md`, `LEADERBOARD.md`, `COMPETITIVE_TEARDOWN.md` and
+`BENCHMARK_INTEGRITY_AUDIT.md` quote the pre-2i default (0.7795–0.780). They are kept
+as historical measurements of that configuration and are not silently rewritten.
+
 ### Phase 2h — query expansion at equal slots, measured 2026-11-18 — **negative, and the default PRF is load-bearing**
 
 Gate 2b asks for a mechanism that beats plain retrieval *at the same slot count*.

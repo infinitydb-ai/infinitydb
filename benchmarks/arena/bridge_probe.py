@@ -199,6 +199,35 @@ def hit_at(facts: list[str], ev_texts: list[str], k: int) -> float:
     return 0.0 if value != value else value
 
 
+def mmr_select(items: list[dict], k: int, lam: float) -> list[dict]:
+    """Greedy maximal-marginal-relevance over the candidate pool.
+
+    Multi-hop recall fails when the second hop never enters the context, and the
+    usual cause is redundancy: several near-duplicate turns about hop one crowd
+    out the one turn that carries hop two. Penalising similarity to what is
+    already selected trades redundancy for coverage without spending a slot.
+    """
+    if not items:
+        return []
+    by_text = {i: content_words(item["fact"]) for i, item in enumerate(items)}
+    top = max(item.get("score", 0.0) for item in items) or 1.0
+    chosen: list[int] = []
+    while len(chosen) < min(k, len(items)):
+        best, best_val = None, float("-inf")
+        for i, item in enumerate(items):
+            if i in chosen:
+                continue
+            redundancy = max((len(by_text[i] & by_text[j]) / max(1, len(by_text[i] | by_text[j]))
+                              for j in chosen), default=0.0)
+            value = lam * (item.get("score", 0.0) / top) - (1.0 - lam) * redundancy
+            if value > best_val:
+                best, best_val = i, value
+        if best is None:
+            break
+        chosen.append(best)
+    return [items[i] for i in chosen]
+
+
 def expansion_terms(db: InfinityDB, question: str, conv_id: str, seed_k: int,
                     limit: int, now: float) -> list[str]:
     """Pseudo-relevance feedback: the names in the top hits, minus the question.
@@ -225,7 +254,8 @@ def main() -> int:
     ap.add_argument("--convs", nargs="+", default=[],
                     help="conversation ids (default: every conversation in the dataset)")
     ap.add_argument("--selector", default="null", choices=sorted(SELECTORS))
-    ap.add_argument("--mode", default="scope", choices=("scope", "witness", "expand"),
+    ap.add_argument("--mode", default="scope",
+                    choices=("scope", "witness", "expand", "mmr"),
                     help="scope: pass bridge objects as entity filters. "
                          "witness: quote the turns that asserted the edges instead.")
     ap.add_argument("--compare-budget", action="store_true",
@@ -238,6 +268,12 @@ def main() -> int:
     ap.add_argument("--position", default="bottom", choices=("bottom", "top"),
                     help="where the quoted witnesses go; @10 is set-based and "
                          "order-blind, so only @1 and @3 can move")
+    ap.add_argument("--assembly-depth", type=int, default=0,
+                    help="mmr mode: pass recall(assembly_depth=...) for the arm")
+    ap.add_argument("--pool", type=int, default=40,
+                    help="mmr mode: candidate pool size before diversity selection")
+    ap.add_argument("--lambda-mmr", type=float, default=0.7,
+                    help="mmr mode: relevance weight; 1.0 is plain top-k, 0.0 is pure diversity")
     ap.add_argument("--seed-k", type=int, default=3,
                     help="expand mode: how many baseline hits seed the query expansion")
     ap.add_argument("--engine-expansion", type=float, default=None,
@@ -313,6 +349,24 @@ def main() -> int:
                 bridges = rank_bridges(db, bridge_candidates, qa.question, args.rank)[:args.max_bridges or 3]
             else:
                 bridges = selector.select(qa.question, candidates)
+            if args.mode == "mmr":
+                recall_kwargs = {}
+                if args.assembly_depth:
+                    recall_kwargs["assembly_depth"] = args.assembly_depth
+                pool = db.recall(qa.question, n=args.pool, user_id=conv_id, now=now,
+                                 reinforce=False, include_policies=False, **recall_kwargs)
+                picked = mmr_select(pool.get("results", []), args.top_k, args.lambda_mmr)
+                arm_facts = [f"[{datetime.fromtimestamp(i['ts']).strftime('%d %B %Y')}] {i['fact']}"
+                             for i in picked]
+                scoped_hits.append(score.evidence_hit(arm_facts, ev))
+                for k in KS:
+                    value = hit_at(arm_facts, ev, k)
+                    per_k[f"arm@{k}"].append(value)
+                    fired_k[f"arm@{k}"].append(value)
+                fired_base.append(base_hits[-1])
+                fired_scoped.append(scoped_hits[-1])
+                bridge_count += 1
+                continue
             if args.mode == "expand":
                 # Runs before the bridge guard: expansion needs no bridges, and
                 # with --selector null that guard would short-circuit every
