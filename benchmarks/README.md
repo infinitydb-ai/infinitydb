@@ -23,7 +23,57 @@ bash benchmarks/arena/run.sh          # both systems, then score
 conversations, scoped vs unscoped), and `arena/longmemeval_probe.py` runs
 LongMemEval in the same retrieval-only setting — the dataset MemPalace publishes
 against, so at least one number exists on their metric. Read
-[its README](arena/README.md) for the metric definitions, per-category results, the atom-only ablation and the equal-context table, and the limitations (retrieval proxies without a reader LLM, one dataset, tuned heuristics, one host, no independent reproduction). Systems that need credentials (Zep/Graphiti, TencentDB) are deliberately absent rather than emulated.
+[its README](arena/README.md) for the metric definitions, per-category results, the atom-only ablation and the equal-context table, and the limitations (retrieval proxies without a reader LLM, one dataset, tuned heuristics, one host, no independent reproduction). Systems that need credentials (Zep/Graphiti, TencentDB) are deliberately absent rather than emulated; the local harness's
+`tencentdb_local` row is a flat-vector baseline in a TencentDB-shaped table, not the product.
+
+## Fully local comparison harness
+
+`benchmarks/locomo_local_compare.py` runs the same public LoCoMo file with every
+component local: no API keys and no hosted service. InfinityDB needs nothing
+beyond Python; the optional baseline adapters (Mem0 over local Ollama, Cognee
+over local Ollama, and a flat dense-vector baseline in a TencentDB-shaped table)
+are imported only when selected, and one whose dependency is missing is recorded
+under `skipped_engines` rather than aborting the run.
+
+```bash
+PYTHONPATH=$PWD python benchmarks/locomo_local_compare.py \
+    --engines infinitydb --max-convos 10 --max-qa 500 --top-k 10 --no-logs
+```
+
+It reads the copy of `locomo10.json` already vendored for the arena, so a run
+needs no network. Per engine it records ingestion latency per session, retrieval
+latency per query (p50/p95/p99), retrieved tokens against the full-conversation
+baseline, and three accuracy signals. Only `evidence_recall_at_k_pct` is
+comparable to the arena's rows: it asks whether the retrieved context contains
+the dialogue turn LoCoMo cites as justification. `answer_contained_pct` and
+`context_token_overlap_f1_pct` are string tests against the gold answer — they
+punish long retrieved context and are not reader accuracy, so they must not be
+quoted as one.
+
+Measured run (Linux 6.1.102 x86_64, 8 vCPU, Python 3.12.3, `tiktoken/cl100k_base`,
+[k=10, all ten conversations, category 5 excluded](../locomo-local-results.json)):
+
+| metric | value |
+| --- | --- |
+| questions evaluated | 1,540 (272 sessions ingested) |
+| evidence recall@10 | **87.1%** |
+| retrieval latency | p50 21.8 ms, p95 31.5 ms, p99 54.9 ms |
+| ingestion latency (per ~20-turn session) | p50 29.3 ms, p95 54.7 ms, p99 69.6 ms |
+| retrieved tokens vs full context | 1,643 vs 18,468 (91.1% fewer) |
+| gold-answer containment / token-overlap F1 | 35.97% / 5.61% (proxies only) |
+
+The arena reports 0.8480 evidence recall at the same `k` over all 1,986
+questions, including the category-5 adversarial ones this harness drops, so the
+two are consistent but not identical populations. Latency here is higher than
+the arena's 13.11 ms p50 because one store holds all ten conversations and
+`top_k` is 10, where the arena gives each conversation its own database.
+
+No competitor row was measured in this environment: it has no Ollama and no
+model weights, so a Mem0 or Cognee row produced here would be fiction. The
+arena's Mem0 numbers come from its own pinned virtualenv (`arena/requirements-mem0.txt`);
+those are the ones to quote. The `tencentdb_local` adapter is a flat dense-vector
+baseline, not the TencentDB product, and the report names its backend
+(`pgvector` or `sqlite-flat-vector-emulation`).
 
 ## Reporting results
 

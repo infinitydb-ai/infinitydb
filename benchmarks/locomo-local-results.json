@@ -1,0 +1,59 @@
+{
+  "benchmark": "locomo-local",
+  "dataset": "benchmarks/arena/data/locomo10.json",
+  "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "environment": {
+    "python": "3.12.3",
+    "platform": "Linux-6.1.102-x86_64-with-glibc2.39",
+    "cpu_count": 8,
+    "token_counter": "tiktoken/cl100k_base",
+    "local_llm_model": null,
+    "local_embed_model": "nomic-embed-text"
+  },
+  "settings": {
+    "max_convos": 10,
+    "max_qa_per_convo": 500,
+    "top_k": 10,
+    "category_5_excluded": true
+  },
+  "notes": [
+    "evidence_recall_at_k_pct is the only accuracy column comparable to the LoCoMo arena rows.",
+    "answer_contained_pct and context_token_overlap_f1_pct are string tests against the gold answer; they punish long retrieved context and are not reader accuracy.",
+    "Ingestion latency is per session, with turns added one at a time.",
+    "Category 5 (adversarial) questions are excluded.",
+    "tencentdb_local is a flat dense-vector baseline in a TencentDB-shaped table, not the TencentDB product."
+  ],
+  "summary": [
+    {
+      "engine": "infinitydb",
+      "conversations_evaluated": 10,
+      "sessions_ingested": 272,
+      "queries_evaluated": 1540,
+      "ingestion_latency_ms": {
+        "p50": 29.2675,
+        "p95": 54.7387,
+        "p99": 69.5999,
+        "mean": 32.385
+      },
+      "retrieval_latency_ms": {
+        "p50": 21.7506,
+        "p95": 31.5415,
+        "p99": 54.9408,
+        "mean": 21.299
+      },
+      "tokens": {
+        "mean_full_context_tokens": 18468.1,
+        "mean_retrieved_tokens": 1643.2,
+        "token_savings_pct": 91.1,
+        "api_cost_usd": 0.0
+      },
+      "accuracy": {
+        "context_token_overlap_f1_pct": 5.61,
+        "answer_contained_pct": 35.97,
+        "evidence_recall_at_k_pct": 87.1
+      }
+    }
+  ],
+  "skipped_engines": [],
+  "per_example_logs": {}
+}
