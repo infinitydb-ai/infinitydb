@@ -3,17 +3,17 @@
   "conv": "conv-47",
   "questions": 190,
   "answerable_questions": 150,
-  "ingest_seconds": 1.321,
+  "ingest_seconds": 1.161,
   "qa_f1": 0.0,
   "gold_in_answer": 0.0,
   "answer_in_context": 0.6533,
-  "evidence_recall@k": 0.8711,
+  "evidence_recall@k": 0.8756,
   "adversarial_refusal_rate": 0.0,
   "latency_ms": {
-    "p50": 12.62,
-    "p95": 16.22
+    "p50": 13.24,
+    "p95": 17.49
   },
-  "context_tokens_median": 1070,
+  "context_tokens_median": 1220,
   "errors": 0,
   "by_category": {
     "adversarial": {
@@ -28,7 +28,7 @@
       "f1": 0.0,
       "gold_in_answer": 0.0,
       "answer_in_context": 0.2,
-      "evidence_recall@k": 0.65
+      "evidence_recall@k": 0.6833
     },
     "open-domain": {
       "n": 13,
