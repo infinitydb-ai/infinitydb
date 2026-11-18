@@ -141,10 +141,12 @@ Measured 2026-11-10 on one 8-vCPU CPU-only host, all 10 conversations, 1,986 que
 | --- | --- | --- | --- | --- | --- |
 | **InfinityDB** | **0.8480** | **0.5935** | 1426 | **7.5 s** | **13.1 ms** |
 
-Read the token column with the recall column: the same engine returning 16 rather than
-10 memories reaches 0.8676 at 1,497 tokens, so at matched context the margin over
-"return more memories" is small (+0.005). The advantage that survives is at a fixed
-ten slots, and [Phase 2k](docs/SELF_IMPROVEMENT.md) says so explicitly.
+Read the token column with the recall column. Per returned memory the engine packs
+more usable turns than before, so quality that used to need 20 memories now fits in
+12: 0.8841 at 1,659 tokens against 0.8795 at 1,852 for the previous chunking. At a
+fixed ten slots this row is the comparable number, and the full frontier — including
+where the gain is context rather than retrieval — is in
+[Phase 2k-2l](docs/SELF_IMPROVEMENT.md).
 
 | **InfinityDB**, `dense=` (local MiniLM fusion) | 0.787 | 0.549 | **652** | 8.0 s | 29.0 ms |
 | **InfinityDB**, `budget_tokens=320` | 0.696 | 0.479 | 325 | 8.4 s | 10.8 ms |
