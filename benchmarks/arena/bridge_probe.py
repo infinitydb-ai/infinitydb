@@ -199,12 +199,33 @@ def hit_at(facts: list[str], ev_texts: list[str], k: int) -> float:
     return 0.0 if value != value else value
 
 
+def expansion_terms(db: InfinityDB, question: str, conv_id: str, seed_k: int,
+                    limit: int, now: float) -> list[str]:
+    """Pseudo-relevance feedback: the names in the top hits, minus the question.
+
+    A multi-hop question names one hop and not the other; the top hits usually
+    contain the missing one ("Caroline"), because they share the question's topic.
+    Re-querying with it costs no extra slots — the arm still returns top_k.
+    """
+    seed = db.recall(question, n=seed_k, user_id=conv_id, now=now,
+                     reinforce=False, include_policies=False)
+    asked = {w.lower() for w in content_words(question)}
+    terms: list[str] = []
+    for fact in render(seed):
+        for token in re.findall(r"\b[A-Z][a-zA-Z]+\b", fact):
+            low = token.lower()
+            if low in asked or low in STOPWORDS or low in {t.lower() for t in terms}:
+                continue
+            terms.append(token)
+    return terms[:limit]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--convs", nargs="+", default=[],
                     help="conversation ids (default: every conversation in the dataset)")
     ap.add_argument("--selector", default="null", choices=sorted(SELECTORS))
-    ap.add_argument("--mode", default="scope", choices=("scope", "witness"),
+    ap.add_argument("--mode", default="scope", choices=("scope", "witness", "expand"),
                     help="scope: pass bridge objects as entity filters. "
                          "witness: quote the turns that asserted the edges instead.")
     ap.add_argument("--compare-budget", action="store_true",
@@ -217,6 +238,12 @@ def main() -> int:
     ap.add_argument("--position", default="bottom", choices=("bottom", "top"),
                     help="where the quoted witnesses go; @10 is set-based and "
                          "order-blind, so only @1 and @3 can move")
+    ap.add_argument("--seed-k", type=int, default=3,
+                    help="expand mode: how many baseline hits seed the query expansion")
+    ap.add_argument("--engine-expansion", type=float, default=None,
+                    help="override the engine's built-in PRF weight (recall(expansion=...))")
+    ap.add_argument("--expand-terms", type=int, default=5,
+                    help="expand mode: how many new terms may be added to the query")
     ap.add_argument("--hops", type=int, default=2)
     ap.add_argument("--max-bridges", type=int, default=0,
                     help="override the selector's cap; each quoted witness displaces one recall slot")
@@ -286,6 +313,30 @@ def main() -> int:
                 bridges = rank_bridges(db, bridge_candidates, qa.question, args.rank)[:args.max_bridges or 3]
             else:
                 bridges = selector.select(qa.question, candidates)
+            if args.mode == "expand":
+                # Runs before the bridge guard: expansion needs no bridges, and
+                # with --selector null that guard would short-circuit every
+                # question to the baseline (measured: an identical 0.4939).
+                terms = expansion_terms(db, qa.question, conv_id, args.seed_k,
+                                        args.expand_terms, now)
+                # `entities=` is an AND filter, not a boost: it drops every memory
+                # that lacks a term, so it measured as a no-op. Appending the terms
+                # to the query text ranks with them instead of filtering on them.
+                query = f"{qa.question} {' '.join(terms)}".strip() if terms else qa.question
+                expanded = db.recall(query, n=args.top_k, user_id=conv_id, now=now,
+                                     reinforce=False, include_policies=False,
+                                     **({"expansion": args.engine_expansion}
+                                        if args.engine_expansion is not None else {}))
+                scoped_hits.append(recall_hit(expanded, ev))
+                arm_facts = render(expanded)
+                for k in KS:
+                    value = hit_at(arm_facts, ev, k)
+                    per_k[f"arm@{k}"].append(value)
+                    fired_k[f"arm@{k}"].append(value)
+                fired_base.append(base_hits[-1])
+                fired_scoped.append(scoped_hits[-1])
+                bridge_count += 1
+                continue
             if not bridges:
                 scoped_hits.append(recall_hit(baseline, ev))
                 for k in KS:

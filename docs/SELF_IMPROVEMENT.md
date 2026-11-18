@@ -420,6 +420,56 @@ path is untouched. The API is covered by `tests/test_bridge_additive.py`
 deduplicate); the harness numbers above were produced by the probe, not by this
 entry point, and the two should be reconciled before any release note quotes them.
 
+### Phase 2h — query expansion at equal slots, measured 2026-11-18 — **negative, and the default PRF is load-bearing**
+
+Gate 2b asks for a mechanism that beats plain retrieval *at the same slot count*.
+Bridges failed it. The next candidate was cheaper and better motivated:
+pseudo-relevance feedback. A multi-hop question names one hop and not the other, so
+the top hits often contain the missing name; re-querying with it ranks the answer
+instead of spending extra slots.
+
+| arm (281 multi-hop questions, k=10) | @1 | @3 | @10 | vs baseline |
+|---|---|---|---|---|
+| baseline (engine PRF 0.15) | 0.1750 | 0.3181 | **0.4939** | — |
+| + terms from top-3 hits | **0.1803** | 0.3007 | 0.4513 | −0.0426 |
+| + terms from top-5 hits | **0.1803** | 0.3033 | 0.4539 | −0.0400 |
+
+Expansion **raises precision at 1** (+0.0053, the best @1 in the programme) and
+**lowers recall at 10**: the added terms re-rank the bridge sentence to the top
+while pushing other needed evidence out. At equal slots that is a net loss, so
+Gate 2b stays unmet — now by four mechanisms (bridges, ranking, additive budget,
+expansion).
+
+Three things this measured that are worth keeping:
+
+1. **`recall(entities=…)` is an AND filter, not a boost.** The first arm passed the
+   discovered names as `entities=` and produced an *exactly* identical 0.4939 on
+   every metric. That is a no-op signature, not a negative result — the parameter
+   drops any memory lacking one of the entities. Reading measured behaviour caught
+   what reading the signature had not.
+2. **The probe had a guard that silently disabled a new mode.** `if not bridges:
+   continue` ran before the expansion branch, and the default selector produces no
+   bridges, so every question short-circuited to the baseline. Two configs reported
+   a pristine 0.0000 delta before that was found. A mode that cannot change a number
+   must be made to prove it runs.
+3. **The engine's built-in PRF is load-bearing.** Ablating `recall(expansion=…)` on
+   the same questions:
+
+   | expansion | @10 |
+   |---|---|
+   | 0.00 | 0.4755 (−0.0184) |
+   | **0.15 (default)** | **0.4939** |
+   | 0.30 | 0.4795 (−0.0144) |
+
+   So the shipped default is the best of the three measured points, and the ~1.8
+   points it contributes are real rather than decorative. Adding *more* expansion on
+   top (the arms above) pushes it past that optimum.
+
+The pattern across phases 2c–2h is now unambiguous: on this dataset, every
+mechanism that changes *which* ten memories are returned loses to plain hybrid
+retrieval at ten. The remaining honest options are a better ranking signal (costs a
+model), a larger budget (costs context), or accepting the ceiling.
+
 ### Phase 2g — the equal-budget control, measured 2026-11-18 — **bridges lose to "retrieve more"**
 
 Phase 2f gained +0.0228 by appending witnesses on top of `top_k`. That arm used 18
