@@ -420,6 +420,49 @@ path is untouched. The API is covered by `tests/test_bridge_additive.py`
 deduplicate); the harness numbers above were produced by the probe, not by this
 entry point, and the two should be reconciled before any release note quotes them.
 
+### Phase 2j — chunk span: Gate 2a cleared, at a context price, measured 2026-11-18 — **positive**
+
+Phase 2i left multi-hop at 0.5359 against Gate 2a's 0.55 — 0.014 short. The depth
+sweep showed 1000 reaching 0.5458, still short, so depth alone was not the answer:
+it was buying the *neighbour* of a chunk but the chunk itself was too small.
+
+Assembly capped a returned chunk at **4 turns**. Neighbour windows are three turns,
+so 4 was the smallest span that could express one window — and a multi-hop answer
+frequently needs the turn after that. Raising the cap to 8 is one parameter.
+
+| LoCoMo, `top_k=10`, 1,986 questions | 2i (span 4) | 2j (span 8) | delta |
+|---|---|---|---|
+| evidence_recall@10 | 0.8069 | **0.8324** | **+0.0255** |
+| answer_in_context | 0.5584 | **0.5805** | +0.0221 |
+| **multi-hop** | 0.5359 | **0.5952** | **+0.0593** — Gate 2a cleared |
+| single-hop | 0.9326 | 0.9421 | +0.0095 |
+| temporal | 0.8281 | 0.8549 | +0.0268 |
+| open-domain | 0.4010 | 0.4639 | +0.0629 |
+| adversarial | 0.9327 | 0.9484 | +0.0157 |
+| median context tokens | 963 | **1248** | **+30%** |
+| p50 latency | 12.6 ms | 12.6 ms | flat |
+
+**Gate 2a: 0.5952 ≥ 0.55 at `top_k=10`. Cleared.** Gate 2b (beat plain retrieval at
+matched budget) is checked against *both* budgets, because span growth spends context:
+
+| arm | recall@10 | median tokens |
+|---|---|---|
+| span 8, `k=10` | **0.6206** | 1419 |
+| plain retrieval, `budget_tokens≈1420` | 0.6018 | 1427 |
+| plain retrieval, `n=14` | 0.5945 | 1355 |
+| plain retrieval, `n=20` (unbudgeted) | 0.6491 | 1871 |
+| span 8 at default depth 240 | 0.5952 | 1248 |
+
+At **equal tokens** span-8 still wins (+0.019 over a 1,427-token plain retrieval),
+which is the property Phase 2f lacked. At equal slots it wins by 0.085. It is not,
+however, the whole frontier: unlimited plain retrieval at 1,871 tokens reaches 0.6491.
+The honest statement is that chunk span moves the retrieval *frontier* outward; it
+does not make context free.
+
+Both numbers are reported together everywhere from here on: **recall next to median
+context tokens**, because a retrieval change that buys points with prompt size is
+only half a result.
+
 ### Phase 2i — assembly depth: the first change that beats plain retrieval at equal slots, measured 2026-11-18 — **positive**
 
 Gate 2b had survived four mechanisms. The fifth attempt started as MMR diversity and

@@ -11,13 +11,13 @@ conversations, 1,986 questions, one host, 2026-11-10.
 
 | Claim | Evidence |
 | --- | --- |
-| Retrieval quality leads every competitor we could run offline, without an LLM | evidence recall@10 0.8069 vs mem0 0.678 vs a free BM25+dense hybrid 0.676; answer-in-context 0.5584 vs 0.386 vs 0.389 |
+| Retrieval quality leads every competitor we could run offline, without an LLM | evidence recall@10 0.8324 vs mem0 0.678 vs a free BM25+dense hybrid 0.676; answer-in-context 0.5805 vs 0.386 vs 0.389 |
 | It is not bought with prompt size | at `budget_tokens=320`, recall leads (0.696 vs 0.678) and answer-in-context is +24% (0.479 vs 0.386) |
-| Retrieval survives a crowded store | pooled 10-conversation store: 0.733 unscoped → **0.8069** with `session_id`, identical to ten separate databases |
+| Retrieval survives a crowded store | pooled 10-conversation store: 0.733 unscoped → **0.8324** with `session_id`, identical to ten separate databases |
 | Ingestion is orders of magnitude cheaper | 7.5 s vs 544.3 s for the same 10 conversations (no LLM extraction, no embedding API) |
 | Retrieval latency is an order of magnitude lower | p50 12.6 ms vs 152.1 ms, p95 14.1 ms vs 191.7 ms |
 | Semantic fusion is available without an LLM | `dense=` with a local MiniLM: 0.787 recall, 0.549 in-context, 8% fewer context tokens, 29 ms p50 |
-| It beats the one competitor that runs without a key | TencentDB Agent Memory 1.0.3, keyword/FTS retriever, same 1,977 questions: 0.5254 vs 0.8069 |
+| It beats the one competitor that runs without a key | TencentDB Agent Memory 1.0.3, keyword/FTS retriever, same 1,977 questions: 0.5254 vs 0.8324 |
 | It holds up on the dataset MemPalace publishes against | LongMemEval R@5 0.933 (180-question stratified sample) vs their claimed 96.6% on the full 500 |
 | The memory is auditable | SHA-256 proof per fact, verified against the raw source range; `get_proof()` fails on tampering |
 | It runs with zero third-party dependencies | `pyproject.toml` has an empty dependency list; SQLite only |
@@ -37,7 +37,7 @@ with adjectives.
   committed run because no reader model was available. "Answer accuracy" claims
   would be unsupported.
 - **One dataset, one host, no held-out split, no independent reproduction.**
-  Treat 0.8069 as a tuned LoCoMo observation, not an industry benchmark.
+  Treat 0.8324 as a tuned LoCoMo observation, not an industry benchmark.
 - **No valuation, revenue or market-share evidence.** A $200M valuation is a
   company outcome (distribution, contracts, retention), not something a
   benchmark or a repository can establish.

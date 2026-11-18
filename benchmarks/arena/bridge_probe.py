@@ -268,6 +268,8 @@ def main() -> int:
     ap.add_argument("--position", default="bottom", choices=("bottom", "top"),
                     help="where the quoted witnesses go; @10 is set-based and "
                          "order-blind, so only @1 and @3 can move")
+    ap.add_argument("--chunk-turns", type=int, default=0,
+                    help="mmr mode: pass recall(max_chunk_turns=...) for the arm")
     ap.add_argument("--assembly-depth", type=int, default=0,
                     help="mmr mode: pass recall(assembly_depth=...) for the arm")
     ap.add_argument("--pool", type=int, default=40,
@@ -315,6 +317,8 @@ def main() -> int:
     # overall delta diluted by hundreds of untouched questions says nothing
     # about whether the mechanism works where it applies.
     budget_hits: list[float] = []
+    base_tokens: list[int] = []
+    arm_tokens: list[int] = []
     fired_base: list[float] = []
     fired_scoped: list[float] = []
 
@@ -334,6 +338,7 @@ def main() -> int:
                                  reinforce=False, include_policies=False)
             base_hits.append(recall_hit(baseline, ev))
             base_facts = render(baseline)
+            base_tokens.append(len(re.findall(r"\w+", " ".join(base_facts))))
             base_k = {k: hit_at(base_facts, ev, k) for k in KS}
             for k in KS:
                 per_k[f"base@{k}"].append(base_k[k])
@@ -353,11 +358,14 @@ def main() -> int:
                 recall_kwargs = {}
                 if args.assembly_depth:
                     recall_kwargs["assembly_depth"] = args.assembly_depth
+                if args.chunk_turns:
+                    recall_kwargs["max_chunk_turns"] = args.chunk_turns
                 pool = db.recall(qa.question, n=args.pool, user_id=conv_id, now=now,
                                  reinforce=False, include_policies=False, **recall_kwargs)
                 picked = mmr_select(pool.get("results", []), args.top_k, args.lambda_mmr)
                 arm_facts = [f"[{datetime.fromtimestamp(i['ts']).strftime('%d %B %Y')}] {i['fact']}"
                              for i in picked]
+                arm_tokens.append(len(re.findall(r"\w+", " ".join(arm_facts))))
                 scoped_hits.append(score.evidence_hit(arm_facts, ev))
                 for k in KS:
                     value = hit_at(arm_facts, ev, k)
@@ -470,6 +478,16 @@ def main() -> int:
         print(f"BY-K [{label}] " + " ".join(
             f"@{k} {row[f'base@{k}']} -> {row[f'arm@{k}']}" for k in KS))
     report["position"] = args.position
+    if base_tokens and arm_tokens:
+        import statistics as _st
+        report["tokens"] = {
+            "baseline_median": int(_st.median(base_tokens)),
+            "arm_median": int(_st.median(arm_tokens)),
+            "delta_median": int(_st.median(arm_tokens) - _st.median(base_tokens)),
+        }
+        print(f"TOKENS median baseline={report['tokens']['baseline_median']} "
+              f"arm={report['tokens']['arm_median']} "
+              f"delta={report['tokens']['delta_median']:+d}")
     if budget_hits:
         budget_overall = round(sum(budget_hits) / len(budget_hits), 4)
         report["budget_control"] = {
