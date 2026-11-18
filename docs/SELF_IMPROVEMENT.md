@@ -420,6 +420,43 @@ path is untouched. The API is covered by `tests/test_bridge_additive.py`
 deduplicate); the harness numbers above were produced by the probe, not by this
 entry point, and the two should be reconciled before any release note quotes them.
 
+### Phase 2g — the equal-budget control, measured 2026-11-18 — **bridges lose to "retrieve more"**
+
+Phase 2f gained +0.0228 by appending witnesses on top of `top_k`. That arm used 18
+context slots, and nothing in the comparison held slots constant. This control does:
+same questions, same 18 items, but plain retrieval instead of bridges.
+
+| arm (249 questions where the selector fires) | slots | recall |
+|---|---|---|
+| bridges appended (10 retrieved + 8 witnesses) | 18 | 0.5164 |
+| **plain retrieval, no bridges** | **18** | **0.5714** |
+| delta | — | **−0.0550** |
+
+**The entire Phase 2f gain was context, not bridges.** Given the same budget, the
+retriever picks better material than a quoted witness every time. Nine arms of this
+phase — gating, scoping, ranking, additive budgets — were all variations on a
+mechanism that loses to the simplest possible alternative.
+
+Two consequences, both uncomfortable and both worth writing down:
+
+1. **The bridge programme is closed at equal cost.** Nothing here is shippable as a
+   retrieval improvement. `recall_with_bridges` remains in the library as an opt-in
+   inspection tool, with a note that its measured value is negative against an
+   equal-slot baseline; it should not be recommended to anyone for recall quality.
+2. **The gate itself needs a second form.** Plain retrieval at 18 slots scores
+   0.5714, above the 0.55 gate — but the gate is defined at `top_k=10`, so that does
+   not clear it, and quoting it would be comparing budgets. The gate is therefore
+   restated as two conditions, both at matched budget:
+
+   > **Gate 2a:** multi-hop ≥ 0.55 at `top_k=10`, single-hop down ≤ 0.005.
+   > **Gate 2b:** any multi-hop mechanism must beat plain retrieval *at the same
+   > slot count*, with the slot count reported. Currently: **not met by −0.0550**.
+
+What this says about the remaining work: multi-hop is a *retrieval-budget* problem
+before it is a graph problem. The cheapest honest path to better multi-hop numbers is
+a larger `k` with its token cost stated — not a bridge. Any mechanism that wants to
+justify itself now has a concrete bar: beat plain retrieval with the same slots.
+
 **Gate 2:** multi-hop ≥ 0.55 at `top_k=10` with single-hop down ≤ 0.005, and
 inference cost recorded per question. Below the gate, the model stays out of the
 default path and the adapter ships behind a flag, if at all.
