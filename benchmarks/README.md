@@ -241,3 +241,83 @@ python benchmarks/arena/longmemeval_probe.py --path benchmarks/arena/data/longme
 
 180 of 500 questions are covered in `arena/results/longmemeval/infinitydb-k5.jsonl`:
 recall@5 **0.9333**, median context 534 words, median latency 15.16 ms.
+
+
+### The matched-token win, and what it costs: an opt-in local reranker
+
+Everything above measured the dependency-free lexical path. That path is why the
+equal-token control lost. The follow-up was to give recall a semantic signal
+without putting a model on the default path: `infinitydb-ai[onnx]` builds a local
+FastEmbed cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2`, ~80 MB ONNX, CPU, no API
+key) for `recall(..., rerank=fn)`, and a local embedder for `index_dense` /
+`recall(dense=...)`. The core still installs zero third-party packages.
+
+Same 4 conversations, 99 sessions, 584 questions, `k=10`, `tiktoken/cl100k_base`,
+same vendored `locomo10.json`; `mem0_nollm` was re-run in the same session and
+reproduced its published **74.40% at 418.7 tokens** exactly
+([locomo-token-grid-results.json](locomo-token-grid-results.json), with
+per-question logs for both 420-token InfinityDB rows):
+
+| configuration | budget | returned items | tokens/question | evidence recall@10 | ingest p50 | search p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| default (no model) | 420 | 2.61 | 409.6 | 69.07% | 53.2 ms | 30.3 ms |
+| `dense=` bge-small | 420 | 2.79 | 413.4 | 72.16% | 2,778 ms | 66.7 ms |
+| `dense=` gte-large (Mem0's embedder) | 420 | 2.71 | 410.2 | 70.96% | 10,792 ms | 126.9 ms |
+| **`rerank=` MiniLM cross-encoder** | **420** | **2.65** | **406.0** | **76.80%** | **29.1 ms** | **1,335 ms** |
+| `dense=` + `rerank=` | 420 | 2.71 | 408.8 | 77.15% | 1,081 ms | 1,769 ms |
+| Mem0 `infer=False` (`top_k=10`) | — | 10 requested | 418.7 | 74.40% | 8,405 ms* | 257 ms* |
+
+\* Mem0's latencies were measured while three ONNX runs shared this 8-core host;
+its accuracy and token columns are unaffected. The single-point InfinityDB rows
+carry the same contention caveat: 1.3–1.8 s search p50 is an upper bound, not the
+quiet-host number.
+
+**The reranker closes the gap and passes it.** At a matched budget it returns
+**406.0 tokens for 76.80% evidence recall against Mem0's 418.7 tokens for
+74.40%** — 2.40 points ahead on 3% fewer tokens, where the same call without the
+model scores 69.07%. That is not a different question set: paired per question on
+the same 584 questions, the reranker fixes **81** that the lexical path missed and
+loses **36** it had (McNemar exact two-sided **p = 3.9e-5**). A second full run
+reproduced 76.80% and 406.0 tokens exactly.
+
+The mechanism is not "bigger embedding". Dense fusion with Mem0's own
+`thenlper/gte-large` scored **70.96%** — worse than the small bge model's 72.16%
+and 3.4 points behind Mem0 — because reciprocal-rank fusion still compares two
+independently encoded texts. The cross-encoder reads the query and the passage
+together, which is what single-turn evidence needs. It also costs nothing at write
+time: ingest p50 stays at **29.1 ms**, because there is no index to embed.
+
+The costs, stated rather than buried:
+
+- **Search latency.** 1.3 s p50 (1.8 s under three-way CPU contention) against
+  30 ms for the lexical default and 257 ms for Mem0 on this host. The win is a
+  re-ranking-quality win, not a speed win; the 9.4× retrieval claim belongs to the
+  default path only.
+- **One budget point, not a curve.** A reranked run costs ~10× a lexical run, so
+  the reranker was measured at budget 420 only. Default and dense fusion were
+  measured across 320/420/600/1000/1750:
+
+  | configuration | 320 | 420 | 600 | 1000 | 1750 | unbudgeted |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | tokens (default) | 318.8 | 409.6 | 595.6 | 996.5 | 1,567.4 | 1,748.1 |
+  | evidence recall (default) | 67.18% | 69.07% | 75.43% | 83.85% | 87.29% | 87.97% |
+  | tokens (dense) | 319.2 | 413.4 | 596.5 | 999.4 | 1,553.3 | 1,694.4 |
+  | evidence recall (dense) | 68.04% | 72.16% | 79.04% | 86.77% | 89.18% | 90.38% |
+
+- **Dense fusion is not worth it on top of the reranker.** 77.15% vs 76.80% for
+  1.6 s extra search and a 1.1 s ingest, so the documented recommendation is the
+  reranker alone.
+- **Scope.** Still one dataset, one machine, retrieval proxies only, heuristics
+  and a model chosen on this data. No independent reproduction. The `mem0_nollm`
+  row is Mem0 without an LLM; Mem0 with LLM extraction remains unmeasured here
+  because this host has no Ollama.
+
+Reproduce the winning row (downloads two small models on first run):
+
+```bash
+pip install "infinitydb-ai[onnx]"
+python benchmarks/locomo_local_compare.py --engines infinitydb \
+  --max-convos 4 --max-qa 500 --top-k 10 --budget-tokens 420 --budget-only \
+  --rerank-model Xenova/ms-marco-MiniLM-L-6-v2 \
+  --output benchmarks/locomo-token-grid-results.json
+```

@@ -229,6 +229,11 @@ class InfinityDBAdapter(MemoryAdapter):
         db_path: str,
         budget_tokens: int | None = None,
         fragments: bool = False,
+        dense_model: str = "",
+        dense_weight: float = 0.3,
+        rerank_model: str = "",
+        onnx_cache: str | None = None,
+        onnx_threads: int | None = None,
     ) -> None:
         self.db = InfinityDB(db_path=db_path)
         self._now: float | None = None
@@ -237,10 +242,33 @@ class InfinityDBAdapter(MemoryAdapter):
         # row on the recall/token curve. Label it as such.
         self.budget_tokens = budget_tokens
         self.fragments = fragments
-        if budget_tokens is not None:
-            self.name = f"infinitydb_budget_{budget_tokens}"
+        # Optional local semantic signal. Both are off by default so the
+        # published ``infinitydb`` row keeps measuring the dependency-free path.
+        self.dense_model = dense_model
+        self.dense_weight = dense_weight
+        self.rerank_model = rerank_model
+        self._embed = None
+        self._rerank = None
+        if dense_model:
+            from infinitydb.local_models import local_embedder
+
+            self._embed, self.dense_model = local_embedder(
+                model=dense_model, cache_dir=onnx_cache, threads=onnx_threads
+            )
+        if rerank_model:
+            from infinitydb.local_models import local_reranker
+
+            self._rerank = local_reranker(
+                model=rerank_model, cache_dir=onnx_cache, threads=onnx_threads
+            )
+        base = "infinitydb"
+        if dense_model:
+            base += "_dense"
+        if rerank_model:
+            base += "_rerank"
         if fragments:
-            self.name = f"infinitydb_fragments_budget_{budget_tokens}"
+            base += "_fragments"
+        self.name = base if budget_tokens is None else f"{base}_budget_{budget_tokens}"
 
     def ingest_session(
         self,
@@ -264,6 +292,10 @@ class InfinityDBAdapter(MemoryAdapter):
             )
             if ts is not None:
                 self._now = max(self._now or ts, ts)
+        if self._embed is not None:
+            # Embedding is part of writing a dense index, so it is timed as
+            # ingest rather than hidden in the first recall.
+            self.db.index_dense(self._embed, model=self.dense_model)
         return (time.perf_counter() - t0) * 1000.0
 
     def retrieve(self, user_id: str, query: str, limit: int = 5) -> tuple[list[str], float]:
@@ -284,6 +316,12 @@ class InfinityDBAdapter(MemoryAdapter):
             # word count (measured at ~1.24 words per token here).
             token_counter=count_tokens if self.budget_tokens is not None else None,
             pack_fragments=self.fragments,
+            dense=(
+                (self._embed, self.dense_model, self.dense_weight)
+                if self._embed is not None
+                else None
+            ),
+            rerank=self._rerank,
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         facts = []
@@ -872,6 +910,11 @@ def build_adapter(
             os.path.join(tmpdir, f"infinity{suffix}.db"),
             budget_tokens,
             fragments=getattr(args, "fragment_budget", False),
+            dense_model=getattr(args, "dense_model", "") or "",
+            dense_weight=getattr(args, "dense_weight", 0.3),
+            rerank_model=getattr(args, "rerank_model", "") or "",
+            onnx_cache=getattr(args, "onnx_cache", None),
+            onnx_threads=getattr(args, "onnx_threads", None),
         )
     if name == "mem0_local":
         return Mem0LocalAdapter(
@@ -921,6 +964,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--budget-only",
+        action="store_true",
+        help=(
+            "With --budget-tokens, skip the unbudgeted row. Useful when a slow "
+            "opt-in reranker makes the endpoint expensive to measure."
+        ),
+    )
+    parser.add_argument(
         "--fragment-budget",
         action="store_true",
         help=(
@@ -929,6 +980,30 @@ def main() -> None:
             "than packing whole chunks at the same token cost."
         ),
     )
+    parser.add_argument(
+        "--dense-model",
+        default="",
+        help=(
+            "Enable opt-in dense fusion with this FastEmbed model "
+            "(e.g. BAAI/bge-small-en-v1.5). Needs infinitydb-ai[onnx]. Off by "
+            "default: the infinitydb row must keep measuring the dependency-free path."
+        ),
+    )
+    parser.add_argument(
+        "--rerank-model",
+        default="",
+        help=(
+            "Enable an opt-in local cross-encoder reranker with this FastEmbed "
+            "model (e.g. Xenova/ms-marco-MiniLM-L-6-v2). Needs infinitydb-ai[onnx]."
+        ),
+    )
+    parser.add_argument("--dense-weight", type=float, default=0.3)
+    parser.add_argument(
+        "--onnx-cache",
+        default=None,
+        help="Model cache directory for FastEmbed (default: FastEmbed's own cache).",
+    )
+    parser.add_argument("--onnx-threads", type=int, default=None)
     parser.add_argument("--use-local-judge", action="store_true")
     parser.add_argument(
         "--output",
@@ -959,7 +1034,8 @@ def main() -> None:
         for name in args.engines:
             if name == "infinitydb" and args.budget_tokens:
                 # Keep the unbudgeted row so the curve has a measured endpoint.
-                runs.append((name, None))
+                if not getattr(args, "budget_only", False):
+                    runs.append((name, None))
                 runs.extend((name, budget) for budget in args.budget_tokens)
             else:
                 runs.append((name, None))
@@ -1019,6 +1095,10 @@ def main() -> None:
             "category_5_excluded": True,
             "recall_budget_tokens": args.budget_tokens,
             "pack_fragments": args.fragment_budget,
+            "dense_model": args.dense_model or None,
+            "dense_weight": args.dense_weight if args.dense_model else None,
+            "rerank_model": args.rerank_model or None,
+            "onnx_threads": args.onnx_threads,
         },
         "notes": [
             "evidence_recall_at_k_pct is the only accuracy column comparable to the LoCoMo arena rows.",

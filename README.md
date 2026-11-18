@@ -28,6 +28,29 @@
 
 ---
 
+## Give your agent memory in one command
+
+InfinityDB is an MCP server first: Claude Code, Cursor, Windsurf and any MCP host
+get local long-term memory with no clone, no API key and no service to run.
+
+```bash
+# Claude Code
+claude mcp add infinitydb -- uvx --from infinitydb-ai infinitydb-mcp
+```
+
+`uvx` fetches the package into an ephemeral environment and runs the console
+script, so there is no virtualenv to keep in sync. It exposes 13 tools, including
+`recall_memory` (scoped by session, entity, point-in-time and token budget),
+`entity_graph`, `contradictions` and `verify_proof`. Any other host needs one
+`mcpServers` entry: [docs/MCP_SERVER.md](docs/MCP_SERVER.md) has the copy-paste
+JSON for Claude Desktop and Cursor, plus the `Stop`-hook that captures a
+transcript incrementally.
+
+Measured cost of adoption (same page): 0 third-party packages, ~2 ms p50 per
+recall through the transport, 19.8 MB peak RSS.
+
+---
+
 ## Try it in one command
 
 ```bash
@@ -112,7 +135,7 @@ Most memory systems compress history into an opaque vector pile. When recall fai
 *   **Temporal Fact History:** `add(..., ts=)` records when something happened. A newer single-valued fact (location, role, employer, identity, budget) automatically supersedes the older one, and `recall(..., as_of=ts)` returns what was current at that time. Multi-valued facts (preferences, relations) are never superseded automatically, and the engine does not infer contradictions between free-text facts; use `supersede_fact()` for those.
 *   **Cryptographic Proof Chain:** Every fact contains an immutable SHA-256 hash linking to its exact source slice in the raw log.
 *   **Tenant-Scoped Guardrails (L4 Policies):** Combines global baseline policies with tenant-specific SOPs; a tenant's private policies are excluded from other tenants' recall.
-*   **Indexed Hybrid Retrieval:** SQLite FTS5 (porter-stemmed) narrows keyword candidates; strong terms from the best few hits are fed back into the query (light pseudo-relevance feedback), which recovers paraphrases such as "job" for "work"; importance weighting and Ebbinghaus time-decay rank the retrieved facts. A cross-encoder reranker can be plugged in through `recall(..., rerank=fn)` if you want the last few percent and can pay for it. Latency depends on dataset, hardware, and workload.
+*   **Indexed Hybrid Retrieval:** SQLite FTS5 (porter-stemmed) narrows keyword candidates; strong terms from the best few hits are fed back into the query (light pseudo-relevance feedback), which recovers paraphrases such as "job" for "work"; importance weighting and Ebbinghaus time-decay rank the retrieved facts. A local cross-encoder can be plugged in through `recall(..., rerank=fn)` (`infinitydb-ai[onnx]`): measured at a matched token budget it beats Mem0's zero-LLM recall (76.80% at 406 tokens vs 74.40% at 419) for ~1.3 s of extra search latency. Latency depends on dataset, hardware, and workload.
 
 ---
 
@@ -169,6 +192,8 @@ over the same turns plus `thenlper/gte-large` embeddings, fused with reciprocal
 rank fusion (k=60), all local. It does not beat mem0 here — fusing the two
 signals does not fix what a bag-of-words index and one embedding lose — and it
 costs mem0-class ingest time.
+
+**At Mem0's token budget, the opt-in local reranker is ahead.** `pip install "infinitydb-ai[onnx]"` builds a CPU cross-encoder (no key, ~80 MB) for `recall(..., rerank=fn)`. On the 584-question local harness at `budget_tokens=420`: **76.80% evidence recall@10 at 406.0 tokens against Mem0 `infer=False`'s 74.40% at 418.7 tokens** (2.40 points ahead on 3% fewer tokens), paired per question at 81 fixed vs 36 broken, p = 3.9e-5. The same call without the model scores 69.07%. It costs **1.3 s p50 search** (30 ms lexical) and leaves ingest untouched at 29 ms; dense fusion adds almost nothing on top (77.15%) and is documented as not worth it. Details, the full 320–1750-token curve and the negative results: [benchmarks/README.md](benchmarks/README.md).
 
 The `dense=` row is not the default configuration: it needs an embedding model you supply yourself. The arena used `fastembed` with `sentence-transformers/all-MiniLM-L6-v2` — one ~90 MB download, no API key. The engine bundles no model and declares no runtime dependencies, so enabling it means installing an embedder yourself (`pip install fastembed`), running `db.index_dense(embedder, "minilm")`, then calling `recall(..., dense=(embedder, "minilm", 1.0))`.
 

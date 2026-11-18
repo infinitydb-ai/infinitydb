@@ -143,3 +143,32 @@ Off by default, and measured: on LoCoMo it changes BM25 tokens enough to cost
 a reader. Duration phrases ("the last year", "past year") and ambiguous ones
 ("last summer") are deliberately left untouched, and the raw L0 log always keeps
 the original wording.
+
+
+## Optional local models (`infinitydb-ai[onnx]`)
+
+`recall(...)` takes any callable embedder or reranker, so the core stays
+dependency-free. `infinitydb.local_models` builds two of them from FastEmbed's
+ONNX Runtime models:
+
+```bash
+pip install "infinitydb-ai[onnx]"
+```
+
+```python
+from infinitydb import InfinityDB
+from infinitydb.local_models import local_embedder, local_reranker
+
+db = InfinityDB("memory.db")
+embed, model = local_embedder()        # BAAI/bge-small-en-v1.5, ~130 MB, CPU
+db.index_dense(embed, model=model)     # incremental; embeds new turn windows only
+hits = db.recall("where did they move", user_id="alice",
+                 dense=(embed, model, 0.3))
+
+rerank = local_reranker()              # Xenova/ms-marco-MiniLM-L-6-v2 cross-encoder
+hits = db.recall("where did they move", user_id="alice", rerank=rerank)
+```
+
+Neither is on by default: both add latency, and the measured recall/token
+trade-off is in [benchmarks/README.md](../benchmarks/README.md). After the
+one-time model download, both run offline on CPU with no API key.
