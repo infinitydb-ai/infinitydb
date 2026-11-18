@@ -420,6 +420,46 @@ path is untouched. The API is covered by `tests/test_bridge_additive.py`
 deduplicate); the harness numbers above were produced by the probe, not by this
 entry point, and the two should be reconciled before any release note quotes them.
 
+### Phase 2k — the cost-matched frontier, measured 2026-11-18 — **the gain is largely context, and the docs now say so**
+
+Phases 2i–2j moved evidence_recall@10 from 0.780 to 0.8480 while median returned
+context went from 711 to 1,426 tokens. That is close to a doubling of prompt size,
+and the gate both phases were judged against (`top_k=10`) counts *slots*, not tokens.
+A slot-count gate cannot see the difference between "ten memories" and "ten memories
+carrying twice the text". So the change was measured against the thing it actually
+spends.
+
+Same engine, same questions, chunking style as the control:
+
+| arm | slots | recall@10 | median tokens |
+|---|---|---|---|
+| **new default** (depth 1000, span 12) | **10** | **0.8729** | **1426** |
+| old chunking (depth 240, span 4), `n=16` | 16 | 0.8676 | 1497 |
+| old chunking, `n=20` | 20 | 0.8795 | 1852 |
+
+**At matched context the improvement is +0.005, not +0.068.** The earlier headline
+number compares 1,426 tokens against 711 tokens, and anyone reading it as a retrieval
+breakthrough would be misled.
+
+What genuinely holds:
+
+- **At ten slots the new default is far ahead** (0.8480 vs 0.780 official; 0.8729 vs
+  0.8101 in the probe's scope). If a caller's budget is "ten memories", this is real.
+- **Multi-hop clears its gate on the gate's own terms:** 0.6260 ≥ 0.55 at `k=10`.
+- **Cost in CPU is negligible** (1.01× at 2,000 and 10,000 facts), so nothing here is
+  slower — it is *fuller*.
+
+What does not hold: that the chunking work made retrieval fundamentally better per
+token spent. At equal tokens it is within noise of simply returning more old-style
+memories.
+
+Consequence for the roadmap, stated plainly: **the gate should count tokens, not
+slots.** Any future claim of the form "better at `top_k=10`" has to be accompanied by
+the median token cost of the ten memories, or it can be satisfied by packing. Gate 2a
+is hereby recorded as met *under the slot definition that was published before the
+run* — and the equal-cost result is recorded next to it, because a gate that can be
+passed by redefining what a slot holds was never a strong gate.
+
 ### Phase 2j — chunk span: Gate 2a cleared, at a context price, measured 2026-11-18 — **positive**
 
 Phase 2i left multi-hop at 0.5359 against Gate 2a's 0.55 — 0.014 short. The depth

@@ -162,15 +162,16 @@ def normalise_relative_dates(text: str, ts: float) -> str:
 # scores 0.8101 overall (multi-hop 0.4939), 240 scores 0.8354 (multi-hop 0.5359),
 # with every category improving. Query latency falls from 27.9 ms to 16.8 ms on a
 # 2,000-fact store because the top-up pass no longer runs.
-_ASSEMBLY_DEPTH = 240
+_ASSEMBLY_DEPTH = 1000
 
 # Turns a returned chunk may span. Neighbour windows are three turns, so 4 was the
 # smallest value that could express one window; a multi-hop answer often needs the
 # turn after that as well. Measured on LoCoMo @10: 4 -> 8 lifts multi-hop 0.5359 to
 # 0.5952 and every other category with it, for +30% median context (963 -> 1248
-# tokens). Callers who would rather pay tokens than answer quality can set
+# tokens). At depth 1000 the joint setting is 0.6260 for 1,426 tokens, with every
+# category up again. Callers who would rather pay tokens than answer quality can set
 # `budget_tokens` or pass a smaller `max_chunk_turns`.
-_MAX_CHUNK_TURNS = 8
+_MAX_CHUNK_TURNS = 12
 
 
 class InfinityDB:
