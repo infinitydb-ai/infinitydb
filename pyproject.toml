@@ -25,11 +25,13 @@ infinitydb-migrate = "infinitydb.migrate:main"
 infinitydb-evidence = "infinitydb.evidence:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "langgraph-checkpoint>=2.0"]
 # Opt-in local semantic recall. The default install stays dependency-free; this
 # extra pulls ONNX Runtime through fastembed for a local embedder and
 # cross-encoder (no API key, no network call after the model download).
 onnx = ["fastembed>=0.6", "onnx>=1.16"]
+# Opt-in LangGraph BaseStore adapter (infinitydb.integrations.langgraph).
+langgraph = ["langgraph-checkpoint>=2.0"]
 # Opt-in PostgreSQL backend for infinitydb.storage and for
 # InfinityDB(dsn=...). The storage contract also needs the pgvector extension
 # (CREATE EXTENSION vector); the Python pgvector package is not needed.
