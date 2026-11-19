@@ -1377,6 +1377,7 @@ class InfinityDB:
         now: float,
         expansion: float = 0.0,
         rerank: Any = None,
+        rerank_top_k: int | None = None,
         query: str = "",
         session_id: str | None = None,
         entity_stems: list[set[str]] | None = None,
@@ -1672,13 +1673,17 @@ class InfinityDB:
         if rerank is not None and len(chunks) > 1:
             # Optional cross-encoder pass over the assembled chunks. Lexical
             # scoring decides which chunks exist; the reranker decides which of
-            # them are worth the caller's context window.
-            scores = list(rerank(query, ["\n".join(c["_turns"]) for c in chunks]))
-            if len(scores) == len(chunks):
-                order = sorted(
-                    range(len(chunks)), key=lambda i: -float(scores[i])
-                )[:n]
-                chunks = [chunks[i] for i in order]
+            # them are worth the caller's context window. ``rerank_top_k`` caps
+            # how many chunks are cross-encoded: everything below the cap keeps
+            # its lexical order and is only used to fill slots the reranked head
+            # cannot fill. A cross-encoder costs one forward pass per passage,
+            # so this is the knob that makes the pass affordable per query.
+            head = chunks if rerank_top_k is None else chunks[:rerank_top_k]
+            scores = list(rerank(query, ["\n".join(c["_turns"]) for c in head]))
+            if len(scores) == len(head):
+                order = sorted(range(len(head)), key=lambda i: -float(scores[i]))
+                tail = chunks[len(head):] if rerank_top_k is not None else []
+                chunks = ([head[i] for i in order] + tail)[:n]
         out = [
             {
                 "id": chunk["id"],
@@ -1983,6 +1988,7 @@ class InfinityDB:
         pack_fragments: bool = False,
         expansion: float = 0.15,
         rerank: Any = None,
+        rerank_top_k: int | None = None,
         session_id: str | None = None,
         entities: list[str] | None = None,
         dense: Any = None,
@@ -2023,6 +2029,13 @@ class InfinityDB:
         (for example a cross-encoder) applied to the merged turn chunks. It is a
         plug-in so the engine keeps zero third-party dependencies; the same
         query with no reranker is the default and is measurably faster.
+
+        ``rerank_top_k`` bounds that pass: only the first ``rerank_top_k``
+        chunks in lexical order are cross-encoded, and the rest keep their
+        lexical order behind the reranked head. A cross-encoder pays one forward
+        pass per passage, so this is the difference between reranking 30
+        candidates and reranking 8; the measured effect of each setting is in
+        ``benchmarks/README.md``.
 
         ``session_id`` and ``entities`` restrict the search space before ranking:
         only memories from that session, and only memories mentioning every
@@ -2066,6 +2079,12 @@ class InfinityDB:
             raise ValueError("expansion must be between 0 and 1")
         if rerank is not None and not callable(rerank):
             raise TypeError("rerank must be a callable or None")
+        if rerank_top_k is not None and (
+            isinstance(rerank_top_k, bool)
+            or not isinstance(rerank_top_k, int)
+            or rerank_top_k < 1
+        ):
+            raise ValueError("rerank_top_k must be a positive integer or None")
         if dense is not None:
             if not (isinstance(dense, (tuple, list)) and len(dense) == 3):
                 raise TypeError("dense must be a (embedder, model, weight) tuple or None")
@@ -2131,6 +2150,7 @@ class InfinityDB:
                 now,
                 expansion=float(expansion),
                 rerank=rerank,
+                rerank_top_k=rerank_top_k,
                 query=query,
                 session_id=session_id,
                 entity_stems=entity_stems,

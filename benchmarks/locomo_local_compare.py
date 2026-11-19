@@ -232,6 +232,8 @@ class InfinityDBAdapter(MemoryAdapter):
         dense_model: str = "",
         dense_weight: float = 0.3,
         rerank_model: str = "",
+        rerank_top_k: int | None = None,
+        rerank_quantize: bool = False,
         onnx_cache: str | None = None,
         onnx_threads: int | None = None,
     ) -> None:
@@ -247,6 +249,8 @@ class InfinityDBAdapter(MemoryAdapter):
         self.dense_model = dense_model
         self.dense_weight = dense_weight
         self.rerank_model = rerank_model
+        self.rerank_top_k = rerank_top_k
+        self.rerank_quantize = rerank_quantize
         self._embed = None
         self._rerank = None
         if dense_model:
@@ -259,13 +263,22 @@ class InfinityDBAdapter(MemoryAdapter):
             from infinitydb.local_models import local_reranker
 
             self._rerank = local_reranker(
-                model=rerank_model, cache_dir=onnx_cache, threads=onnx_threads
+                model=rerank_model,
+                cache_dir=onnx_cache,
+                threads=onnx_threads,
+                quantize=rerank_quantize,
             )
         base = "infinitydb"
         if dense_model:
             base += "_dense"
         if rerank_model:
             base += "_rerank"
+            # The label must say how much of the ranking was reranked: 8 pairs
+            # and 30 pairs are different rows, not the same row measured twice.
+            if rerank_top_k is not None:
+                base += f"{rerank_top_k}"
+            if rerank_quantize:
+                base += "_int8"
         if fragments:
             base += "_fragments"
         self.name = base if budget_tokens is None else f"{base}_budget_{budget_tokens}"
@@ -322,6 +335,7 @@ class InfinityDBAdapter(MemoryAdapter):
                 else None
             ),
             rerank=self._rerank,
+            rerank_top_k=self.rerank_top_k,
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         facts = []
@@ -913,6 +927,8 @@ def build_adapter(
             dense_model=getattr(args, "dense_model", "") or "",
             dense_weight=getattr(args, "dense_weight", 0.3),
             rerank_model=getattr(args, "rerank_model", "") or "",
+            rerank_top_k=getattr(args, "rerank_top_k", None),
+            rerank_quantize=getattr(args, "rerank_quantize", False),
             onnx_cache=getattr(args, "onnx_cache", None),
             onnx_threads=getattr(args, "onnx_threads", None),
         )
@@ -995,6 +1011,24 @@ def main() -> None:
         help=(
             "Enable an opt-in local cross-encoder reranker with this FastEmbed "
             "model (e.g. Xenova/ms-marco-MiniLM-L-6-v2). Needs infinitydb-ai[onnx]."
+        ),
+    )
+    parser.add_argument(
+        "--rerank-top-k",
+        type=int,
+        default=None,
+        help=(
+            "With --rerank-model, cross-encode only the first N chunks in lexical "
+            "order (recall(rerank_top_k=N)) instead of all 3*--top-k of them. "
+            "Fewer pairs is the only lever that makes the pass cheap per query."
+        ),
+    )
+    parser.add_argument(
+        "--rerank-quantize",
+        action="store_true",
+        help=(
+            "With --rerank-model, run an INT8 (dynamic-quantized) copy of the "
+            "cross-encoder instead of fp32. Built once and cached in --onnx-cache."
         ),
     )
     parser.add_argument("--dense-weight", type=float, default=0.3)
@@ -1098,6 +1132,8 @@ def main() -> None:
             "dense_model": args.dense_model or None,
             "dense_weight": args.dense_weight if args.dense_model else None,
             "rerank_model": args.rerank_model or None,
+            "rerank_top_k": args.rerank_top_k,
+            "rerank_quantize": args.rerank_quantize,
             "onnx_threads": args.onnx_threads,
         },
         "notes": [
