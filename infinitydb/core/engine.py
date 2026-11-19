@@ -207,11 +207,12 @@ class InfinityDB:
         extraction, scoring, chunk-assembly and budget-packing code runs on
         both, so a Postgres deployment is not a different ranker.
 
-        ``tenant_id`` binds a Postgres connection to one tenant. Engine tables
-        carry a private ``_tenant`` column protected by Row-Level Security, so a
-        query that forgets a scope cannot widen across tenants. The SQLite path
-        is deliberately single-tenant (one file is one tenant) and rejects any
-        other value rather than silently ignoring it.
+        ``tenant_id`` binds a Postgres connection to one tenant. Each tenant has
+        its own schema and the connection's ``search_path`` points at it, so the
+        engine's unqualified table names only ever reach that tenant's rows, and
+        content-derived atom ids cannot collide with another tenant's. The SQLite
+        path is deliberately single-tenant (one file is one tenant) and rejects
+        any other value rather than silently ignoring it.
 
         ``initialize=False`` skips the one-time DDL, for callers that manage
         their own migrations.

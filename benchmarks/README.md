@@ -380,3 +380,30 @@ python benchmarks/locomo_local_compare.py --engines infinitydb \
   --rerank-model Xenova/ms-marco-MiniLM-L-6-v2 --rerank-top-k 8 --rerank-quantize \
   --output benchmarks/locomo-rerank-latency-results.json
 ```
+
+## Multi-tenant scale on PostgreSQL
+
+`benchmarks/postgres_scale_bench.py` writes the same synthetic fact shape into
+every tenant's schema with a marker token unique to that tenant, then reads it
+back through `InfinityDB` and checks storage, unqualified reads and `recall()`
+for foreign markers ([results](postgres-scale-results.json)):
+
+```bash
+pip install "infinitydb-ai[postgres]" pgserver
+python benchmarks/postgres_scale_bench.py --total-atoms 100000 --tenants 100 --skip-locomo
+```
+
+| metric | value |
+| --- | --- |
+| atoms stored / tenant schemas | 100,000 / 100 (1,000 each) |
+| `add()` p50 / p95 / p99 | 2.20 / 4.43 / 7.01 ms |
+| `recall(k=10)` p50 / p95 / p99 | 25.37 / 33.71 / 36.42 ms |
+| foreign-marker rows / recall results | 0 / 0 |
+| rows seen by unqualified reads | 1,000 per tenant |
+
+Half the queries omit the tenant marker on purpose, and every row is scanned for
+every other tenant's marker, so this is a leak check rather than a marker-match
+check. Context for the numbers: ingest averaged 220 atoms/s because each `add()`
+is its own committed transaction, one add took 29 s (a checkpoint; p99 is 7 ms),
+and the run is one host, one process and synthetic facts. It is evidence that
+isolation holds and a floor for production latency, not a capacity guarantee.
