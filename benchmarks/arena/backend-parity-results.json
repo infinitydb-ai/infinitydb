@@ -1,0 +1,117 @@
+{
+  "dataset": "benchmarks/.cache/locomo10.json",
+  "settings": {
+    "max_convos": 4,
+    "max_questions_per_convo": 500,
+    "top_k": 10,
+    "budget_tokens": null
+  },
+  "questions": 584,
+  "identical_payloads": 84,
+  "identical_payload_rate_pct": 14.38,
+  "evidence_recall_at_k_pct": {
+    "sqlite": 87.97,
+    "postgres": 88.14
+  },
+  "evidence_regressions": [
+    {
+      "conversation": 2,
+      "question": "When did Maria meet Jean?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "When did Maria get in a car accident?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "What did John recently get promoted to?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What is something Nate gave to Joanna that brings her a lot of joy?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    }
+  ],
+  "evidence_decisions_equal": 573,
+  "evidence_questions": 582,
+  "evidence_decision_parity_pct": 98.45,
+  "differing": [
+    {
+      "conversation": 2,
+      "question": "When did Maria meet Jean?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "When did Maria get in a car accident?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "Around which US holiday did Maria get into a car accident?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "Would John be open to moving to another country?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "What did John recently get promoted to?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "How does John describe the support he received during his journey to becoming assistant manager?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "What kind of activities did Maria do at the picnic with her church friends?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 3,
+      "question": "What is something Nate gave to Joanna that brings her a lot of joy?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What dish did Nate make on 9 November, 2022?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    }
+  ],
+  "latency_ms": {
+    "sqlite": {
+      "p50": 15.68,
+      "p95": 23.33,
+      "p99": 48.26
+    },
+    "postgres": {
+      "p50": 63.77,
+      "p95": 102.83,
+      "p99": 130.32
+    }
+  },
+  "ingest_p50_ms": {
+    "sqlite": 14.87,
+    "postgres": 50.74
+  }
+}
