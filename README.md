@@ -400,6 +400,37 @@ WAL settings.
 
 ---
 
+## Storage backends (SQLite · PostgreSQL + pgvector)
+
+The default install is SQLite and stays dependency-free. Deployments that need a
+shared database can use the same storage contract on PostgreSQL 14+ with the
+`vector` extension:
+
+```bash
+pip install "infinitydb-ai[postgres]"
+```
+
+```python
+from infinitydb.storage import open_backend
+
+store = open_backend(dsn="postgresql://user@host/infinitydb")
+store.append_turns([...])
+store.insert_atoms([...])
+```
+
+Both backends implement `StorageBackend` from `infinitydb/storage/base.py`: L0
+turns, L1 atoms with the L6 SHA-256 chain assigned inside the write transaction,
+L2 edge traversal, FTS5 / tsvector lexical search, pgvector HNSW dense search,
+L3 persona state, L4 policies, L5 reinforcement and per-user erasure. Every
+operation is scoped to one `(tenant_id, user_id)`; on PostgreSQL each transaction
+binds the tenant with `SET LOCAL` and Row-Level Security is enabled and forced.
+
+Scope today: the core `InfinityDB` engine still uses its own SQLite schema and is
+not yet routed through this layer; the two can share one database file (the
+storage tables are prefixed `oams_`). See [docs/STORAGE.md](docs/STORAGE.md).
+
+---
+
 ## Resource lifecycle (Python)
 
 Close persistent and in-memory database handles when the application is finished with

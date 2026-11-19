@@ -30,6 +30,9 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 # extra pulls ONNX Runtime through fastembed for a local embedder and
 # cross-encoder (no API key, no network call after the model download).
 onnx = ["fastembed>=0.6", "onnx>=1.16"]
+# Opt-in PostgreSQL backend for infinitydb.storage. The database itself needs the
+# pgvector extension (CREATE EXTENSION vector); the Python package is not needed.
+postgres = ["psycopg[binary,pool]>=3.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["infinitydb"]
