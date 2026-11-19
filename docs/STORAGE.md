@@ -174,3 +174,32 @@ one host.
 The gate fails if PostgreSQL's aggregate evidence recall is below SQLite's on
 the same run. `scripts/verify.sh` runs a 40-question subset when the extra and
 `pgserver` are installed, and says it skipped otherwise.
+
+### Measured scale and isolation
+
+`benchmarks/postgres_scale_bench.py` writes 1,000 facts into each of 100
+schemas, every fact carrying a token unique to its tenant, then reads back
+through the engine ([results](../benchmarks/postgres-scale-results.json)):
+
+| metric | value |
+| --- | --- |
+| atoms stored / tenant schemas | 100,000 / 100 |
+| `add()` p50 / p95 / p99 | 2.20 / 4.43 / 7.01 ms |
+| `recall(k=10)` p50 / p95 / p99 | 25.37 / 33.71 / 36.42 ms |
+| foreign-marker rows in storage | 0 |
+| foreign-marker results in 500 recalls | 0 |
+| rows seen by unqualified reads | 1,000 per tenant |
+
+```bash
+pip install "infinitydb-ai[postgres]" pgserver
+python benchmarks/postgres_scale_bench.py --total-atoms 100000 --tenants 100 --skip-locomo
+```
+
+The isolation check is deliberately not marker-only: half the queries omit the
+tenant marker, and every tenant's rows are scanned for every other tenant's
+marker, so a leak would surface even where ranking happens to return nothing.
+This is schema isolation verified through `search_path`, not an RLS policy, and
+it is single-host, single-process evidence with synthetic facts. Ingest averaged
+220 atoms/s because each `add()` commits its own transaction, and one add took
+29 s (a checkpoint); the p99 is 7 ms. Read it as a floor for a production
+deployment, not a capacity guarantee.

@@ -1,0 +1,77 @@
+{
+  "gate": "postgres-scale",
+  "commit": "c2ccbf3",
+  "host": {
+    "platform": "Linux-6.1.102-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "cpu_count": 8
+  },
+  "postgres_version": "16.2",
+  "settings": {
+    "total_atoms_requested": 100000,
+    "tenants": 100,
+    "atoms_per_tenant": 1000,
+    "queries_per_tenant": 5,
+    "top_k": 10,
+    "seed": 1729,
+    "locomo": "skipped"
+  },
+  "storage": {
+    "atoms_requested": 100000,
+    "atoms_stored": 100000,
+    "atoms_per_tenant_min": 1000,
+    "atoms_per_tenant_max": 1000,
+    "distinct_tenant_schemas": 100
+  },
+  "ingest": {
+    "turns": 100000,
+    "total_seconds": 454.46,
+    "atoms_per_second": 220.0,
+    "latency_ms": {
+      "p50": 2.2,
+      "p95": 4.43,
+      "p99": 7.01,
+      "mean": 3.36,
+      "max": 28991.71
+    }
+  },
+  "recall": {
+    "queries": 500,
+    "empty_results": 0,
+    "latency_ms": {
+      "p50": 25.37,
+      "p95": 33.71,
+      "p99": 36.42,
+      "mean": 25.76,
+      "max": 41.41
+    }
+  },
+  "isolation": {
+    "schema_mismatches": [],
+    "storage_foreign_marker_rows": 0,
+    "recall_foreign_marker_results": 0,
+    "recall_foreign_examples": [],
+    "unqualified_rows_min": 1000,
+    "unqualified_rows_max": 1000
+  },
+  "locomo_sanity": {
+    "status": "skipped"
+  },
+  "limits": [
+    "One host, one process, synthetic facts; not a production capacity claim.",
+    "add() is one committed transaction per turn, as the public API does.",
+    "Schema isolation is verified by marker scans and search_path; it is not an RLS policy."
+  ],
+  "gates": {
+    "atoms_stored_equals_requested": true,
+    "zero_cross_tenant_markers": true,
+    "add_p95_limit_ms": 100.0,
+    "recall_p95_limit_ms": 250.0,
+    "add_p95_within_limit": true,
+    "recall_p95_within_limit": true,
+    "schema_matches_search_path": true
+  },
+  "result": "PASS",
+  "measured_tree": "8e15e07",
+  "note": "Measured on the tree that main squash-merged as c2ccbf3 (PR #115)."
+}
