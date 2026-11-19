@@ -4,7 +4,7 @@ Python (`from infinitydb import InfinityDB`):
 
 - `add(conversation, user_id="default", session_id=None, importance=0.9, ts=None, auto_supersede=True, extractor=None)` — store a conversation or log. `ts` is the event time (Unix seconds) used for decay, `as_of` recall and ordering.
   - `extractor` — optional callable `extractor(text) -> [fact, ...]` for model-written facts (an LLM, a tagger, a batch job). Each item is a dict with `fact` and optional `category` (lowercase snake_case), `importance` (0–1). Extracted facts keep an L6 provenance row; a paraphrase that does not occur verbatim is recorded with `char_start = -1`. Errors raised by the extractor propagate — a provider outage is not silently an empty conversation. Default `None`: fully deterministic, offline ingestion.
-- `recall(query, n=5, user_id=None, include_policies=True, as_of=None, now=None, reinforce=True, turn_windows=True, budget_tokens=None, token_counter=None, pack_fragments=False, expansion=0.15, rerank=None, session_id=None, entities=None)` — retrieve memories.
+- `recall(query, n=5, user_id=None, include_policies=True, as_of=None, now=None, reinforce=True, turn_windows=True, budget_tokens=None, token_counter=None, pack_fragments=False, expansion=0.15, rerank=None, rerank_top_k=None, session_id=None, entities=None)` — retrieve memories.
   - `n` — maximum number of memories.
   - `user_id` — tenant scope; `None` searches all users.
   - `as_of` / `now` — evaluate retrieval and decay at a point in time.
@@ -14,7 +14,8 @@ Python (`from infinitydb import InfinityDB`):
   - `token_counter` — optional `text -> int` callable used to count the budget (for example a BPE tokenizer). Default `None` counts words, so a caller who measures tokens sees the budget grow by ~1.24×; pass the same counter you measure with to keep it honest.
   - `pack_fragments` — with `budget_tokens`, split merged turn chunks into individual turns before packing, so the budget buys many small slots instead of two or three large chunks. Opt-in and off by default because it measured **worse** on evidence recall than packing whole chunks at the same token cost (67.70% vs 69.07% at ~409 tokens on four LoCoMo conversations); it only wins on the token-overlap proxies, which reward short contexts. With `n` slots, budgets larger than `n` turns are not spent — raise `n` for a larger prompt.
   - `expansion` — weight (0–1) for light pseudo-relevance feedback: strong terms from the best three chunks are added to the query so paraphrases ("job" for "work") still match. Default `0.15`; `0` scores the query words alone.
-  - `rerank` — optional callable `rerank(query, passages) -> list[float]` applied to the merged turn chunks, e.g. a cross-encoder. The core stays dependency-free: on LoCoMo a `ms-marco-MiniLM-L-6` reranker added ~1% relative recall for ~14× the latency, so it is off by default.
+  - `rerank` — optional callable `rerank(query, passages) -> list[float]` applied to the merged turn chunks, e.g. a cross-encoder. The core stays dependency-free: on four LoCoMo conversations at a matched 420-token budget an `ms-marco-MiniLM-L-6` cross-encoder moves evidence recall@10 from 69.07% to 76.80% (and to 75.60% for the cheap INT8 / top-8 configuration below) for 135–616 ms of search latency, so it is off by default.
+  - `rerank_top_k` — cross-encode only the first `rerank_top_k` chunks in lexical order; the rest keep their lexical order behind the reranked head and only fill slots it cannot. A cross-encoder pays one forward pass per passage, so this is the lever that makes the pass affordable: `rerank_top_k=8` at `n=10` measured 135 ms p50 search against 616 ms reranking all 30 assembled chunks, with 75.60% vs 76.80% evidence recall. `None` (default) reranks every assembled chunk. Values below `n` mean the bottom of the returned list is lexical.
   - `session_id` — restrict retrieval to one session/project/conversation. Corpus statistics (document frequencies, average length) are computed *inside* the scope, so a scoped query ranks exactly as it would against a database holding only that session.
   - `entities` — list of names/topics; a memory is considered only if it mentions every one of them. Use it to scope by person, product, or repo.
   - Scoping is measured: pooling ten conversations into one store costs 4.7 points of evidence recall@10 unscoped (0.780 → 0.733); the same store recalled with `session_id` returns 0.780, at 40 ms p50. See [benchmarks/arena/README.md](../benchmarks/arena/README.md).
@@ -167,8 +168,16 @@ hits = db.recall("where did they move", user_id="alice",
 
 rerank = local_reranker()              # Xenova/ms-marco-MiniLM-L-6-v2 cross-encoder
 hits = db.recall("where did they move", user_id="alice", rerank=rerank)
+
+# Cheap enough for an interactive query: INT8 weights, eight candidates
+fast_rerank = local_reranker(quantize=True)
+hits = db.recall("where did they move", user_id="alice",
+                 rerank=fast_rerank, rerank_top_k=8)
 ```
 
-Neither is on by default: both add latency, and the measured recall/token
-trade-off is in [benchmarks/README.md](../benchmarks/README.md). After the
-one-time model download, both run offline on CPU with no API key.
+`quantize=True` builds an INT8 copy of the same model once with
+`onnxruntime.quantization.quantize_dynamic` and caches it beside the fp32 file;
+it needs the `onnx` package, which the extra installs. Neither model is on by
+default: both add latency, and the measured recall/token trade-off is in
+[benchmarks/README.md](../benchmarks/README.md). After the one-time model
+download, both run offline on CPU with no API key.

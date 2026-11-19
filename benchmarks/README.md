@@ -270,7 +270,8 @@ per-question logs for both 420-token InfinityDB rows):
 \* Mem0's latencies were measured while three ONNX runs shared this 8-core host;
 its accuracy and token columns are unaffected. The single-point InfinityDB rows
 carry the same contention caveat: 1.3–1.8 s search p50 is an upper bound, not the
-quiet-host number.
+quiet-host number. Re-measured one run at a time, the reranker costs **616 ms p50**
+and the affordable configuration in the next section costs **135 ms**.
 
 **The reranker closes the gap and passes it.** At a matched budget it returns
 **406.0 tokens for 76.80% evidence recall against Mem0's 418.7 tokens for
@@ -320,4 +321,62 @@ python benchmarks/locomo_local_compare.py --engines infinitydb \
   --max-convos 4 --max-qa 500 --top-k 10 --budget-tokens 420 --budget-only \
   --rerank-model Xenova/ms-marco-MiniLM-L-6-v2 \
   --output benchmarks/locomo-token-grid-results.json
+```
+
+
+### Making that reranker affordable: eight candidates and INT8
+
+76.80% recall is worth little if a query costs 1.3 s. Two changes cut that by
+4.5×, and they were gated numerically before the runs: **search p50 ≤ 300 ms**
+and **evidence recall ≥ 75.0%** (at least 90% of the 6.53-point rerank gain over
+the 69.07% lexical default).
+
+- **`recall(rerank_top_k=8)`** — the engine assembles up to `3*k = 30` chunks, and
+the first version cross-encoded every one of them. A cross-encoder pays one
+forward pass per passage, so reranking only the eight chunks lexical scoring
+already ranks highest is ~4× less work; the lexical tail keeps its order and only
+fills slots the reranked head does not.
+- **`local_reranker(quantize=True)`** — dynamic INT8 quantization of the same
+MiniLM model with `onnxruntime.quantization`, built once and cached next to the
+model. It changes the arithmetic per pair, not the number of pairs.
+
+Same 584 questions, same budget, four configurations, one run at a time on the
+same host ([locomo-rerank-latency-results.json](locomo-rerank-latency-results.json),
+per-question logs for all four):
+
+| configuration | budget | tokens/question | evidence recall@10 | search p50 | search p95 | ingest p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| rerank all chunks, fp32 | 420 | 406.0 | 76.80% | 616.1 ms | 969.5 ms | 30.4 ms |
+| rerank all chunks, INT8 | 420 | 405.1 | 76.29% | 453.1 ms | 765.8 ms | 29.9 ms |
+| rerank top 8, fp32 | 420 | 411.6 | 76.46% | 176.3 ms | 283.6 ms | 31.3 ms |
+| **rerank top 8, INT8** | **420** | **411.8** | **75.60%** | **135.5 ms** | **225.0 ms** | **31.4 ms** |
+| default, no model | 420 | 409.6 | 69.07% | 30.3 ms | — | 53.2 ms |
+
+Both gates pass: **135.5 ms p50** and **75.60%** recall. Against Mem0
+`infer=False` (74.40% at 418.7 tokens, 257 ms search) the cheap configuration is
+still **1.20 points ahead at 411.8 tokens**, 2% fewer than Mem0's, and it is the
+row to reach for when a query must stay interactive. The full reranker remains the
+accuracy row at +2.40 points.
+
+What the two levers cost in recall, paired per question on the same 584 questions:
+top-8 + INT8 fixes **66** the lexical path misses and breaks **28**
+(McNemar exact **p = 1.1e-4**), and against reranking everything it is 10 fixed
+vs 17 broken (**p = 0.25**) — a 4.5× latency cut that this harness cannot
+distinguish from the expensive row. Quantizing without capping changes recall by
+6 fixed vs 9 broken; capping without quantizing by 11 vs 13. Neither lever alone
+is the gain, and neither is a measurable loss.
+
+The costs, stated rather than buried: 135 ms is still **4.5× the lexical path's
+30 ms**, so the cheap reranker is a latency-priced accuracy feature, not a free
+one; the INT8 model is an extra build step and a second cached file; and this is
+still one dataset on one host with no independent reproduction. `rerank_top_k`
+below `k` means the bottom of the returned list is lexical, which is why the
+benchmark's `rerank_top_k` is 8 and `k` is 10 rather than the other way round.
+
+```bash
+pip install "infinitydb-ai[onnx]"
+python benchmarks/locomo_local_compare.py --engines infinitydb \
+  --max-convos 4 --max-qa 500 --top-k 10 --budget-tokens 420 --budget-only \
+  --rerank-model Xenova/ms-marco-MiniLM-L-6-v2 --rerank-top-k 8 --rerank-quantize \
+  --output benchmarks/locomo-rerank-latency-results.json
 ```

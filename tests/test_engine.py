@@ -922,6 +922,51 @@ def test_recall_accepts_optional_reranker_plugin():
         db.recall(query, user_id="rr", rerank="not-callable")  # type: ignore[arg-type]
 
 
+def test_rerank_top_k_bounds_the_cross_encoder_pass():
+    db = InfinityDB()
+    topics = ["garden", "concert", "bicycle", "harbour", "orchard", "lantern"]
+    for i, topic in enumerate(topics):
+        db.add(
+            f"Alice: the {topic} was worth the walk on day {i}.",
+            user_id="rtk",
+            session_id=f"day-{i}",
+            ts=1_700_000_000.0 + i * 60,
+        )
+
+    batches: list[int] = []
+
+    def keep_order(_query: str, passages: list[str]) -> list[float]:
+        batches.append(len(passages))
+        return [0.0 for _ in passages]
+
+    res = db.recall(
+        "garden concert bicycle harbour orchard lantern",
+        n=5,
+        user_id="rtk",
+        reinforce=False,
+        rerank=keep_order,
+        rerank_top_k=2,
+    )
+    assert batches == [2], "only rerank_top_k chunks may be cross-encoded"
+    assert len(res["results"]) == 5, "the lexical tail still fills the slots"
+
+    full = db.recall(
+        "garden concert bicycle harbour orchard lantern",
+        n=5,
+        user_id="rtk",
+        reinforce=False,
+        rerank=keep_order,
+    )
+    assert batches[-1] > 2, "without the cap every assembled chunk is scored"
+    assert len(full["results"]) == 5
+
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="rerank_top_k"):
+            db.recall("garden", user_id="rtk", rerank=keep_order, rerank_top_k=bad)
+    with pytest.raises(ValueError, match="rerank_top_k"):
+        db.recall("garden", user_id="rtk", rerank_top_k=True)  # type: ignore[arg-type]
+
+
 def test_recall_scope_limits_results_to_session_and_entity():
     db = InfinityDB()
     db.add(
