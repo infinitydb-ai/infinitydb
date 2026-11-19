@@ -1,0 +1,201 @@
+{
+  "dataset": "benchmarks/.cache/locomo10.json",
+  "settings": {
+    "max_convos": 4,
+    "max_questions_per_convo": 500,
+    "top_k": 10,
+    "budget_tokens": 420
+  },
+  "questions": 584,
+  "identical_payloads": 222,
+  "identical_payload_rate_pct": 38.01,
+  "evidence_recall_at_k_pct": {
+    "sqlite": 69.07,
+    "postgres": 69.07
+  },
+  "evidence_regressions": [
+    {
+      "conversation": 0,
+      "question": "Where did Caroline move from 4 years ago?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 1,
+      "question": "What do the dancers in the photo represent?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "When did Maria meet Jean?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "What did John attend with his colleagues in March 2023?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "What does John believe is important for children regarding veterans?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What emotions is Joanna feeling about  the screenplay she submitted?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What places has Joanna submitted her work to?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What is something Nate gave to Joanna that brings her a lot of joy?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What did Joanna share with her writers group in August 2022?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    }
+  ],
+  "evidence_decisions_equal": 564,
+  "evidence_questions": 582,
+  "evidence_decision_parity_pct": 96.91,
+  "differing": [
+    {
+      "conversation": 0,
+      "question": "Where did Caroline move from 4 years ago?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 1,
+      "question": "What do the dancers in the photo represent?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "When did Maria meet Jean?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "What damages have happened to John's car?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "Around which US holiday did Maria get into a car accident?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "What did John attend with his colleagues in March 2023?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 2,
+      "question": "How does John describe the support he received during his journey to becoming assistant manager?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "What kind of activities did Maria do at the picnic with her church friends?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 2,
+      "question": "What does John believe is important for children regarding veterans?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What emotions is Joanna feeling about  the screenplay she submitted?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What underlying condition might Joanna have based on her allergies?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 3,
+      "question": "What places has Joanna submitted her work to?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What is something Nate gave to Joanna that brings her a lot of joy?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    },
+    {
+      "conversation": 3,
+      "question": "What activities does Nate do with his turtles?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 3,
+      "question": "For how long has Nate had his turtles?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 3,
+      "question": "What is Nate's favorite genre of movies?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 3,
+      "question": "What does Nate do that he loves and can make money from?",
+      "sqlite_hit": false,
+      "postgres_hit": true
+    },
+    {
+      "conversation": 3,
+      "question": "What did Joanna share with her writers group in August 2022?",
+      "sqlite_hit": true,
+      "postgres_hit": false
+    }
+  ],
+  "latency_ms": {
+    "sqlite": {
+      "p50": 16.03,
+      "p95": 26.14,
+      "p99": 48.0
+    },
+    "postgres": {
+      "p50": 64.06,
+      "p95": 108.15,
+      "p99": 157.64
+    }
+  },
+  "ingest_p50_ms": {
+    "sqlite": 14.53,
+    "postgres": 47.9
+  }
+}

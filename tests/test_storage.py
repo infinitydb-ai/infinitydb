@@ -397,11 +397,19 @@ def test_delete_user_data_erases_only_that_user(storage, scope):
             created_at=1.0,
         )
     )
+    storage.record_feedback(scope.tenant, scope.user, "fact zero", "a0", 1.0, 2.0)
     storage.insert_atoms([make_atom(scope, "keep", "other user fact", user_id=scope.other_user)])
     storage.append_turns([make_turn(scope, 0, turn_id="keep-turn", user_id=scope.other_user)])
 
     counts = storage.delete_user_data(scope.tenant, scope.user)
-    assert counts == {"turns": 2, "atoms": 2, "edges": 1, "personas": 1, "policies": 1}
+    assert counts == {
+        "turns": 2,
+        "atoms": 2,
+        "edges": 1,
+        "personas": 1,
+        "policies": 1,
+        "feedback": 1,
+    }
     assert storage.get_latest_chain_hash(scope.tenant, scope.user) == GENESIS_HASH
     assert storage.get_persona_state(scope.tenant, scope.user) == {}
     assert storage.search_lexical(scope.tenant, scope.user, "fact") == []

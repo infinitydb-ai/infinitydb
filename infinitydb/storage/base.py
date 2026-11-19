@@ -18,6 +18,7 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 # The hash that starts a user's L6 provenance chain. It is not a real digest:
@@ -131,6 +132,19 @@ class CausalEdge:
 
 
 @dataclass(slots=True)
+class FeedbackWeights:
+    """Normalised priors learned from caller feedback on recall results.
+
+    ``terms`` maps a stemmed term to a weight in [0, 1]; ``atoms`` maps an
+    atom id to a weight in [0, 1]. Both are empty when no memory has enough
+    net support, so a caller can pass them straight into a ranker.
+    """
+
+    terms: dict[str, float] = field(default_factory=dict)
+    atoms: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class PolicyRule:
     """L4 tenant-scoped governance / guardrail rule."""
 
@@ -143,6 +157,70 @@ class PolicyRule:
     priority: int = 100
     enabled: bool = True
     created_at: float = 0.0
+
+
+@lru_cache(maxsize=32768)
+def stem_token(token: str) -> str:
+    """Conservative suffix stripping, mirroring an FTS porter token.
+
+    Full Porter is not reimplemented here; these rules cover the
+    plural/gerund/past forms that otherwise split "walks" from "walking" in a
+    question/answer pair. The function is pure, so it is memoised: a recall
+    over a few hundred candidates otherwise re-stems the same vocabulary words
+    tens of thousands of times.
+    """
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 5 and token.endswith(("sses", "shes", "ches", "xes")):
+        return token[:-2]
+    if len(token) > 3 and token.endswith("s") and not token.endswith(("ss", "us", "is")):
+        return token[:-1]
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+    if len(token) > 4 and token.endswith("ed"):
+        return token[:-2]
+    return token
+
+
+def feedback_weights_from_rows(
+    rows: Sequence[dict[str, Any] | Any],
+    min_support: float = 2.0,
+    max_terms: int = 256,
+) -> FeedbackWeights:
+    """Shared weighting rule for :meth:`StorageBackend.feedback_weights`.
+
+    ``rows`` must expose ``label``, ``atom_id`` and ``fact_text``. Kept here so
+    both backends derive identical weights from identical feedback instead of
+    each encoding the arithmetic in its own SQL dialect.
+    """
+    import re as _re
+
+    votes: dict[str, float] = {}
+    atom_votes: dict[str, float] = {}
+    for row in rows:
+        label = float(row["label"])
+        weight = 1.0 if label > 0 else -0.5
+        atom_id = row["atom_id"]
+        atom_votes[atom_id] = atom_votes.get(atom_id, 0.0) + label
+        fact = str(row["fact_text"] or "").lower()
+        for term in {stem_token(t) for t in _re.findall(r"\w+", fact) if len(t) > 2}:
+            votes[term] = votes.get(term, 0.0) + weight
+
+    supported = {term: value for term, value in votes.items() if value >= min_support}
+    terms: dict[str, float] = {}
+    if supported:
+        top = sorted(supported.items(), key=lambda kv: (-kv[1], kv[0]))[:max_terms]
+        ceiling = max(value for _, value in top)
+        terms = {term: round(value / ceiling, 4) for term, value in top}
+
+    # A label naming one exact atom is direct evidence, so a single net vote is
+    # enough for the atom prior; term priors need repeated support because one
+    # word is shared by many memories.
+    atoms = {atom: value for atom, value in atom_votes.items() if value >= 1.0}
+    if atoms:
+        ceiling = max(abs(value) for value in atoms.values()) or 1.0
+        atoms = {atom: round(value / ceiling, 4) for atom, value in atoms.items()}
+    return FeedbackWeights(terms=terms, atoms=atoms)
 
 
 def canonical_payload(atom: FactAtom) -> str:
@@ -234,6 +312,22 @@ class StorageBackend(ABC):
         window_radius: int = 1,
     ) -> list[TurnRecord]:
         """Neighbouring turns around a matched turn, for context-window assembly."""
+
+    @abstractmethod
+    def get_turn_windows(
+        self,
+        tenant_id: str,
+        user_id: str,
+        turn_ids: Sequence[str],
+        window_radius: int = 1,
+    ) -> list[TurnRecord]:
+        """Neighbouring turns for many matched turns in one batched query.
+
+        ``get_turn_window`` answers "what surrounds this turn"; a ranker needs
+        "what surrounds each of these twenty turns" and must not pay twenty
+        round trips for it. Duplicate centres are collapsed and the result is
+        ordered by ``(session_id, turn_index)`` so chunk assembly is stable.
+        """
 
     # --- L1 + L6: Atomic Facts & Cryptographic Provenance Chain ---
 
@@ -352,6 +446,37 @@ class StorageBackend(ABC):
         stability_multiplier: float = 1.5,
     ) -> None:
         """Bump access counters and stability when a recalled atom is reinforced."""
+
+    @abstractmethod
+    def record_feedback(
+        self,
+        tenant_id: str,
+        user_id: str,
+        query: str,
+        atom_id: str,
+        label: float,
+        created_at: float,
+    ) -> int:
+        """Append one caller judgement (+1 relevant, -1 irrelevant) and return its id.
+
+        Feedback never mutates an atom: a wrong label is offset by later ones and
+        the whole signal can be dropped without touching memory content.
+        """
+
+    @abstractmethod
+    def feedback_weights(
+        self,
+        tenant_id: str,
+        user_id: str,
+        min_support: float = 2.0,
+        max_terms: int = 256,
+    ) -> FeedbackWeights:
+        """Turn recorded judgements into normalised term and atom priors.
+
+        Deliberately simple and inspectable: each stemmed term scores its net
+        votes across atoms marked relevant (+1) or irrelevant (-0.5), needs
+        ``min_support`` net votes to count, and is normalised to [0, 1].
+        """
 
     # --- Compliance / GDPR right to erasure ---
 

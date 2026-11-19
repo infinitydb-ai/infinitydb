@@ -29,6 +29,7 @@ from .base import (
     payload_hash,
     verify_chain,
 )
+from .engine import open_engine_store
 from .sqlite import SqliteStorage
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     "canonical_payload",
     "normalise_embedding",
     "open_backend",
+    "open_engine_store",
     "payload_hash",
     "verify_chain",
 ]

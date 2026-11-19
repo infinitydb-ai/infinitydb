@@ -19,8 +19,9 @@ import json
 import math
 import re
 from array import array
-import sqlite3
 from collections import Counter
+
+from infinitydb.storage.engine import open_engine_store
 
 
 def normalise_vector(vector: list[float]) -> list[float]:
@@ -165,6 +166,13 @@ def normalise_relative_dates(text: str, ts: float) -> str:
 # 2,000-fact store because the top-up pass no longer runs.
 _ASSEMBLY_DEPTH = 1000
 
+# How many scored turn windows chunk assembly may see. This is the historical
+# FTS5 candidate cap the published LoCoMo rows were measured with. It is applied
+# to the shared ranking, so a backend that fetched a wider candidate set (the
+# PostgreSQL store does, because ts_rank_cd and bm25 disagree about the order)
+# is capped by the same Python scores as SQLite.
+_RANKED_CANDIDATE_CAP = 400
+
 # Turns a returned chunk may span. Neighbour windows are three turns, so 4 was the
 # smallest value that could express one window; a multi-hop answer often needs the
 # turn after that as well. Measured on LoCoMo @10: 4 -> 8 lifts multi-hop 0.5359 to
@@ -183,23 +191,48 @@ class InfinityDB:
     persona conflict resolution, enterprise policies, and cryptographic proof chains.
     """
 
-    def __init__(self, db_path: str = ":memory:") -> None:
-        self.db_path = db_path
-        self._is_memory = db_path == ":memory:"
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        *,
+        dsn: str | None = None,
+        tenant_id: str = "default",
+        initialize: bool = True,
+    ) -> None:
+        """Open the engine on SQLite (``db_path``) or PostgreSQL (``dsn``).
+
+        ``db_path`` is the dependency-free default and the path every published
+        number was measured on. ``dsn`` switches persistence to PostgreSQL on
+        PostgreSQL 14+ (``pip install "infinitydb-ai[postgres]"``); the same
+        extraction, scoring, chunk-assembly and budget-packing code runs on
+        both, so a Postgres deployment is not a different ranker.
+
+        ``tenant_id`` binds a Postgres connection to one tenant. Engine tables
+        carry a private ``_tenant`` column protected by Row-Level Security, so a
+        query that forgets a scope cannot widen across tenants. The SQLite path
+        is deliberately single-tenant (one file is one tenant) and rejects any
+        other value rather than silently ignoring it.
+
+        ``initialize=False`` skips the one-time DDL, for callers that manage
+        their own migrations.
+        """
+        if dsn is not None and db_path != ":memory:":
+            raise ValueError("pass either db_path (SQLite) or dsn (PostgreSQL), not both")
+        self._store = open_engine_store(
+            db_path=None if dsn is not None else db_path,
+            dsn=dsn,
+            tenant_id=tenant_id,
+            initialize=initialize,
+        )
+        self.db_path = self._store.location
+        self.tenant_id = self._store.tenant_id
+        self._is_memory = dsn is None and db_path == ":memory:"
+        self.conn = self._store.connection
         self._seq = 0
         self._last_auto_ts = 0.0
-        # Stemmed token counts per turn window, keyed by rowid. Windows are
-        # immutable between writes, so this is cleared whenever turns change.
+        # Stemmed token counts per turn window, keyed by the row identity. Windows
+        # are immutable between writes, so this is cleared whenever turns change.
         self._window_terms: dict[int, Counter] = {}
-
-        if not self._is_memory:
-            self.conn.execute("PRAGMA journal_mode = WAL;")
-            # Match the Node.js SDK's FULL synchronous setting. In WAL mode this
-            # requests an fsync of the WAL on each committed transaction.
-            self.conn.execute("PRAGMA synchronous = FULL;")
-        self.conn.execute("PRAGMA foreign_keys = ON;")
 
         self._init_schema()
 
@@ -217,6 +250,10 @@ class InfinityDB:
 
     def _init_schema(self) -> None:
         """Initialize relational tables and indices for L0-L6 layers."""
+        if self._store.backend_name != "sqlite":
+            # PostgresEngineStore.initialize() already created the same tables
+            # with tsvector columns, identity row ids and tenant RLS.
+            return
         self.conn.executescript(
             """
             -- L0: Raw conversation logs and tool offloads
@@ -552,21 +589,10 @@ class InfinityDB:
 
     def _document_frequency(self, term: str) -> int:
         """Number of indexed atoms containing ``term`` (for IDF weighting)."""
-        try:
-            cur = self.conn.execute(
-                "SELECT count(*) FROM l1_atoms_fts WHERE l1_atoms_fts MATCH ?",
-                ('"' + term.replace('"', '""') + '"',),
-            )
-            return int(cur.fetchone()[0])
-        except sqlite3.Error:
-            return 0
+        return self._store.atom_document_frequency(term)
 
     def _average_fact_tokens(self) -> float:
-        row = self.conn.execute(
-            "SELECT AVG(LENGTH(fact) - LENGTH(REPLACE(fact, ' ', '')) + 1) FROM l1_atoms"
-        ).fetchone()
-        value = row[0] if row and row[0] else None
-        return float(value) if value and value > 0 else 1.0
+        return self._store.atom_corpus_stats()[1]
 
     def _corpus_stats(self) -> tuple[int, float]:
         """Atom count and mean fact length in words, in one round trip.
@@ -576,13 +602,7 @@ class InfinityDB:
         for normalisation, so a concurrent writer can only shift the constant
         slightly within a single ranking, exactly as the two-query form could.
         """
-        row = self.conn.execute(
-            "SELECT count(*), AVG(LENGTH(fact) - LENGTH(REPLACE(fact, ' ', '')) + 1) "
-            "FROM l1_atoms"
-        ).fetchone()
-        total = max(1, int(row[0] or 0))
-        avg = float(row[1]) if row[1] and row[1] > 0 else 1.0
-        return total, avg
+        return self._store.atom_corpus_stats()
 
     def put(self, key: str, content: str) -> Memory:
         """Atomically persist a legacy key-value item and its L0-L6 record."""
@@ -902,8 +922,9 @@ class InfinityDB:
         if dialogue_turns:
             self._window_terms.clear()
             session_key = session_id or ""
+            rid = self._store.row_alias
             last = self.conn.execute(
-                """SELECT rowid, seq, turn_text, window_text FROM l1_turn_windows
+                f"""SELECT {rid} AS row_id, seq, turn_text, window_text FROM l1_turn_windows
                    WHERE user_id = ? AND session_id = ?
                    ORDER BY seq DESC LIMIT 1""",
                 (user_id, session_key),
@@ -916,8 +937,8 @@ class InfinityDB:
                     # The previous turn now has a successor, so widen its window
                     # as well. This keeps the window symmetric for every turn.
                     self.conn.execute(
-                        "UPDATE l1_turn_windows SET window_text = ? WHERE rowid = ?",
-                        (f"{last['window_text']}\n{turn_text}", last["rowid"]),
+                        f"UPDATE l1_turn_windows SET window_text = ? WHERE {rid} = ?",
+                        (f"{last['window_text']}\n{turn_text}", last["row_id"]),
                     )
                 else:
                     window_text = turn_text
@@ -928,9 +949,10 @@ class InfinityDB:
                     (atom_id, user_id, session_key, seq, turn_text, window_text, now),
                 )
                 last = {
-                    "rowid": self.conn.execute(
-                        "SELECT rowid FROM l1_turn_windows WHERE atom_id = ?", (atom_id,)
-                    ).fetchone()["rowid"],
+                    "row_id": self.conn.execute(
+                        f"SELECT {rid} AS row_id FROM l1_turn_windows WHERE atom_id = ?",
+                        (atom_id,),
+                    ).fetchone()["row_id"],
                     "seq": seq,
                     "turn_text": turn_text,
                     "window_text": window_text,
@@ -1180,14 +1202,14 @@ class InfinityDB:
         if not isinstance(atom_id, str) or not atom_id.strip():
             raise ValueError("atom_id must not be empty")
         stems = " ".join(sorted({self._stem(t) for t in re.findall(r"\w+", query.lower()) if len(t) > 1}))
-        with self.conn:
-            cur = self.conn.execute(
-                """INSERT INTO recall_feedback (user_id, query, query_stem, atom_id, label, ts)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (user_id, query, stems, atom_id, 1.0 if relevant else -1.0,
-                 time.time() if ts is None else ts),
-            )
-        return int(cur.lastrowid or 0)
+        return self._store.record_feedback_row(
+            user_id,
+            query,
+            stems,
+            atom_id,
+            1.0 if relevant else -1.0,
+            time.time() if ts is None else ts,
+        )
 
     def feedback_summary(self, user_id: str | None = None) -> dict[str, Any]:
         """Counts for the feedback collected so far, so the signal is inspectable."""
@@ -1394,84 +1416,30 @@ class InfinityDB:
         ``_recall_atoms``.
         """
         match_query = " OR ".join(self._fts_match_terms(q_terms))
-        # Corpus statistics are computed *inside the scope*. A scoped query that
-        # still divides by the global document count ranks as if the whole store
-        # competed for the slot, which is exactly the contamination scoping is
-        # meant to remove.
-        scope_sql = "" if session_id is None else " JOIN l1_turn_windows w ON w.rowid = f.rowid"
-        scope_where = "" if session_id is None else " AND w.session_id = ?"
-        scope_params: list[Any] = [] if session_id is None else [session_id]
-
-        def fetch_rows(match_query: str, limit: int) -> list[Any]:
-            sql = """
-                SELECT w.rowid AS window_rowid, w.atom_id, w.session_id, w.seq,
-                       w.turn_text, w.window_text, w.ts,
-                       a.category, a.source_id, a.importance, a.access_count
-                FROM l1_turn_windows_fts f
-                JOIN l1_turn_windows w ON w.rowid = f.rowid
-                JOIN l1_atoms a ON a.id = w.atom_id
-                WHERE l1_turn_windows_fts MATCH ?
-                  AND (? IS NULL OR w.ts <= ?)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM l1_atom_relations r
-                      WHERE r.old_atom_id = w.atom_id
-                        AND (? IS NULL OR r.created_at <= ?)
-                  )
-            """
-            params: list[Any] = [match_query, as_of, as_of, as_of, as_of]
-            if user_id:
-                sql += " AND w.user_id = ?"
-                params.append(user_id)
-            if session_id is not None:
-                # Scoping is the cheapest recall win there is: with a session or
-                # entity filter the ranker never sees the distractors, instead of
-                # ranking them and hoping they lose.
-                sql += " AND w.session_id = ?"
-                params.append(session_id)
-            sql += f" ORDER BY bm25(l1_turn_windows_fts) LIMIT {int(limit)}"
-            return self.conn.execute(sql, params).fetchall()
-
-        rows = fetch_rows(match_query, 400)
+        # Candidate narrowing is backend-specific (FTS5 bm25 here, tsvector on
+        # Postgres); every score below is computed by this same Python code.
+        rows = self._store.lexical_windows(
+            user_id, session_id, as_of, q_terms, match_query,
+            self._store.candidate_limit,
+        )
         if not rows and dense is None:
             # With dense fusion a query that shares no term with the store is
             # still answerable, so the early exit only applies to lexical-only
             # recall.
             return []
-        total_docs = max(
-            1,
-            int(
-                self.conn.execute(
-                    "SELECT count(*) FROM l1_turn_windows_fts f"
-                    + scope_sql
-                    + " WHERE 1 = 1"
-                    + scope_where,
-                    scope_params,
-                ).fetchone()[0]
-            ),
-        )
+        # Corpus statistics are computed *inside the scope*. A scoped query that
+        # still divides by the global document count ranks as if the whole store
+        # competed for the slot, which is exactly the contamination scoping is
+        # meant to remove.
+        total_docs, avg_tokens = self._store.window_corpus_stats(user_id, session_id)
 
         def document_frequency(term: str) -> int:
-            return int(
-                self.conn.execute(
-                    "SELECT count(*) FROM l1_turn_windows_fts f"
-                    + scope_sql
-                    + " WHERE l1_turn_windows_fts MATCH ?"
-                    + scope_where,
-                    ['"' + term.replace('"', '""') + '"', *scope_params],
-                ).fetchone()[0]
-            )
+            return self._store.window_document_frequency(term, user_id, session_id)
 
         idf: dict[str, float] = {}
         for term in {self._stem(t) for t in q_terms}:
             df = document_frequency(term)
             idf[term] = math.log(1.0 + (total_docs - df + 0.5) / (df + 0.5))
-        avg_row = self.conn.execute(
-            "SELECT AVG(LENGTH(w.window_text) - LENGTH(REPLACE(w.window_text, ' ', '')) + 1) "
-            "FROM l1_turn_windows w"
-            + (" WHERE w.session_id = ?" if session_id is not None else ""),
-            scope_params,
-        ).fetchone()
-        avg_tokens = float(avg_row[0]) if avg_row and avg_row[0] else 1.0
         k1, b = 1.2, 0.75
 
         def doc_score(tokens: Counter, doc_len: int, weights: dict[str, float]) -> float:
@@ -1551,22 +1519,10 @@ class InfinityDB:
                 dense_rank.setdefault(rid, rank)
             missing = [rid for rid in dense_rank if rid not in known][:25]
             if missing:
-                clause, params = "", []
-                if session_id is not None:
-                    clause += " AND w.session_id = ?"
-                    params.append(session_id)
-                if user_id:
-                    clause += " AND w.user_id = ?"
-                    params.append(user_id)
-                placeholders = ",".join("?" for _ in missing)
-                extra_rows = self.conn.execute(
-                    "SELECT w.rowid AS window_rowid, w.atom_id, w.session_id, w.seq, "
-                    "w.turn_text, w.window_text, w.ts, a.category, a.source_id, "
-                    "a.importance, a.access_count FROM l1_turn_windows w "
-                    "JOIN l1_atoms a ON a.id = w.atom_id "
-                    "WHERE w.rowid IN (" + placeholders + ")" + clause,
-                    [*missing, *params],
-                ).fetchall()
+                # One batched fetch, not one round trip per candidate.
+                extra_rows = self._store.turn_windows_by_ids(
+                    missing, user_id, session_id
+                )
                 for row in extra_rows:
                     tokens = self._window_terms.get(row["window_rowid"])
                     if tokens is None:
@@ -1619,6 +1575,8 @@ class InfinityDB:
                 "_turn": row["turn_text"],
             })
         ranked.sort(key=lambda item: (item["_raw"], item["ts"]), reverse=True)
+        if len(ranked) > _RANKED_CANDIDATE_CAP:
+            ranked = ranked[:_RANKED_CANDIDATE_CAP]
 
         # Merge adjacent turns into contiguous chunks. Ranking order decides
         # which chunk "owns" a turn, so a chunk may still grow after it is
@@ -1733,57 +1691,22 @@ class InfinityDB:
         atom_ids_accessed = []
         if q_terms:
             match_query = " OR ".join(self._fts_match_terms(q_terms))
-            sql = """
-                SELECT a.id, a.user_id, a.fact, a.category, a.source_id,
-                       a.importance, a.access_count, a.ts
-                FROM l1_atoms_fts f
-                JOIN l1_atoms a ON a.rowid = f.rowid
-                WHERE l1_atoms_fts MATCH ?
-                  AND (? IS NULL OR a.ts <= ?)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM l1_atom_relations r
-                      WHERE r.old_atom_id = a.id
-                        AND (? IS NULL OR r.created_at <= ?)
-                  )
-            """
-            params: list[Any] = [match_query, as_of, as_of, as_of, as_of]
-            if user_id:
-                sql += " AND a.user_id = ?"
-                params.append(user_id)
-            if session_id is not None:
-                sql += " AND a.source_id IN (SELECT id FROM l0_logs WHERE session_id = ?)"
-                params.append(session_id)
-            sql += " ORDER BY bm25(l1_atoms_fts) LIMIT 200"
-            cur = self.conn.execute(sql, params)
-            rows = [row for row in cur.fetchall() if in_scope(row["fact"])]
+            rows = [
+                row
+                for row in self._store.lexical_atoms(
+                    user_id, session_id, as_of, q_terms, match_query, 200
+                )
+                if in_scope(row["fact"])
+            ]
 
             # Category routing: add the user's current facts of any category the question points at.
             hinted = sorted(c for c, words in self._CATEGORY_HINTS.items() if words & set(q_terms))
             cat_hits: set[str] = set()
             if hinted:
-                marks = ",".join("?" for _ in hinted)
-                sql2 = f"""
-                    SELECT a.id, a.user_id, a.fact, a.category, a.source_id,
-                           a.importance, a.access_count, a.ts
-                    FROM l1_atoms a
-                    WHERE a.category IN ({marks})
-                      AND (? IS NULL OR a.ts <= ?)
-                      AND NOT EXISTS (
-                          SELECT 1 FROM l1_atom_relations r
-                          WHERE r.old_atom_id = a.id
-                            AND (? IS NULL OR r.created_at <= ?)
-                      )
-                """
-                params2: list[Any] = [*hinted, as_of, as_of, as_of, as_of]
-                if user_id:
-                    sql2 += " AND a.user_id = ?"
-                    params2.append(user_id)
-                if session_id is not None:
-                    sql2 += " AND a.source_id IN (SELECT id FROM l0_logs WHERE session_id = ?)"
-                    params2.append(session_id)
-                sql2 += " ORDER BY a.ts DESC LIMIT 50"
                 seen_ids = {r["id"] for r in rows}
-                for r in self.conn.execute(sql2, params2).fetchall():
+                for r in self._store.category_candidates(
+                    hinted, user_id, session_id, as_of, 50
+                ):
                     if not in_scope(r["fact"]):
                         continue
                     cat_hits.add(r["id"])
@@ -2353,14 +2276,15 @@ class InfinityDB:
             raise TypeError("embedder must be a callable")
         if not isinstance(model, str) or not model.strip():
             raise ValueError("model must be a non-empty string")
+        rid = self._store.row_alias
         rows = self.conn.execute(
-            """SELECT w.rowid AS rid, w.window_text AS text
+            f"""SELECT w.{rid} AS rid, w.window_text AS text
                FROM l1_turn_windows w
                WHERE NOT EXISTS (
                    SELECT 1 FROM l2_vectors v
-                   WHERE v.model = ? AND v.window_rowid = w.rowid
+                   WHERE v.model = ? AND v.window_rowid = w.{rid}
                )
-               ORDER BY w.rowid""",
+               ORDER BY w.{rid}""",
             (model,),
         ).fetchall()
         if limit is not None:
@@ -2408,7 +2332,7 @@ class InfinityDB:
             params.append(user_id)
         rows = self.conn.execute(
             "SELECT v.window_rowid AS rid, v.vec AS vec FROM l2_vectors v "
-            "JOIN l1_turn_windows w ON w.rowid = v.window_rowid "
+            f"JOIN l1_turn_windows w ON w.{self._store.row_alias} = v.window_rowid "
             "WHERE v.model = ?" + clause,
             [model, *params],
         ).fetchall()
@@ -2685,8 +2609,8 @@ class InfinityDB:
         }
 
     def close(self) -> None:
-        """Close the SQLite connection and release its file and WAL handles."""
-        self.conn.close()
+        """Close the connection and release its file, WAL or pool handles."""
+        self._store.close()
 
     def __enter__(self) -> "InfinityDB":
         """Allow deterministic connection cleanup with a context manager."""
@@ -2714,7 +2638,8 @@ class InfinityDB:
             "l3_personas": l3_count,
             "l4_policies": l4_count,
             "l6_cryptographic_proofs": l6_count,
-            "backend": "SQLite-WAL",
+            "backend": "SQLite-WAL" if self._store.backend_name == "sqlite" else "PostgreSQL",
+            "tenant_id": self.tenant_id,
             # This is a design target, not a measured latency guarantee.
             "p95_recall_target_ms": "<5.0",
         }

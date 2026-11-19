@@ -20,11 +20,13 @@ from .base import (
     GENESIS_HASH,
     CausalEdge,
     FactAtom,
+    FeedbackWeights,
     PolicyRule,
     StorageBackend,
     TurnRecord,
     _require_identifier,
     _require_positive_int,
+    feedback_weights_from_rows,
     normalise_embedding,
     payload_hash,
 )
@@ -64,6 +66,7 @@ class SqliteStorage(StorageBackend):
         self._edges = f"{table_prefix}edges"
         self._personas = f"{table_prefix}personas"
         self._policies = f"{table_prefix}policies"
+        self._feedback = f"{table_prefix}feedback"
         self._migrations = f"{table_prefix}schema_migrations"
         self._lock = threading.RLock()
         self._ready = False
@@ -227,6 +230,18 @@ class SqliteStorage(StorageBackend):
         );
         CREATE INDEX IF NOT EXISTS idx_{self._prefix}policies_lookup
             ON {self._policies} (tenant_id, enabled, priority ASC);
+
+        CREATE TABLE IF NOT EXISTS {self._feedback} (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id  TEXT NOT NULL,
+            user_id    TEXT NOT NULL,
+            query      TEXT NOT NULL,
+            atom_id    TEXT NOT NULL,
+            label      REAL NOT NULL,
+            created_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_{self._prefix}feedback_lookup
+            ON {self._feedback} (tenant_id, user_id, atom_id);
         """
 
     # -- low-level helpers -------------------------------------------------
@@ -794,6 +809,110 @@ class SqliteStorage(StorageBackend):
                     [(float(accessed_at), multiplier, tenant_id, user_id, atom_id) for atom_id in ids],
                 )
 
+    def get_turn_windows(
+        self,
+        tenant_id: str,
+        user_id: str,
+        turn_ids: Sequence[str],
+        window_radius: int = 1,
+    ) -> list[TurnRecord]:
+        tenant_id = _require_identifier(tenant_id, "tenant_id")
+        user_id = _require_identifier(user_id, "user_id")
+        radius = _require_positive_int(window_radius, "window_radius", 1000)
+        ids = [turn_id for turn_id in dict.fromkeys(turn_ids) if turn_id]
+        if not ids:
+            return []
+        self._require_ready()
+        marks = ",".join("?" for _ in ids)
+        centers = self._rows(
+            f"SELECT session_id, turn_index FROM {self._turns} "
+            f"WHERE tenant_id = ? AND user_id = ? AND turn_id IN ({marks})",
+            (tenant_id, user_id, *ids),
+        )
+        if not centers:
+            return []
+        values = ",".join("(?, ?)" for _ in centers)
+        params: list[Any] = []
+        for row in centers:
+            params.extend((row["session_id"], row["turn_index"]))
+        rows = self._rows(
+            f"WITH centers(session_id, turn_index) AS (VALUES {values}) "
+            f"SELECT DISTINCT t.* FROM {self._turns} t "
+            "JOIN centers c ON c.session_id = t.session_id "
+            "AND t.turn_index BETWEEN c.turn_index - ? AND c.turn_index + ? "
+            "WHERE t.tenant_id = ? AND t.user_id = ? "
+            "ORDER BY t.session_id ASC, t.turn_index ASC",
+            (*params, radius, radius, tenant_id, user_id),
+        )
+        return [
+            TurnRecord(
+                turn_id=row["turn_id"],
+                tenant_id=row["tenant_id"],
+                user_id=row["user_id"],
+                session_id=row["session_id"],
+                turn_index=row["turn_index"],
+                speaker=row["speaker"],
+                content=row["content"],
+                occurred_at=row["occurred_at"],
+                recorded_at=row["recorded_at"],
+                metadata=_json_load(row["metadata"], {}),
+            )
+            for row in rows
+        ]
+
+    # -- L5 feedback -------------------------------------------------------
+
+    def record_feedback(
+        self,
+        tenant_id: str,
+        user_id: str,
+        query: str,
+        atom_id: str,
+        label: float,
+        created_at: float,
+    ) -> int:
+        tenant_id = _require_identifier(tenant_id, "tenant_id")
+        user_id = _require_identifier(user_id, "user_id")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
+        if not isinstance(atom_id, str) or not atom_id.strip():
+            raise ValueError("atom_id must be a non-empty string")
+        value = float(label)
+        if value not in (-1.0, 1.0):
+            raise ValueError("label must be 1.0 (relevant) or -1.0 (irrelevant)")
+        with self._lock:
+            self._require_ready()
+            with self._write() as conn:
+                cur = conn.execute(
+                    f"INSERT INTO {self._feedback} "
+                    "(tenant_id, user_id, query, atom_id, label, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (tenant_id, user_id, query, atom_id, value, float(created_at)),
+                )
+                return int(cur.lastrowid or 0)
+
+    def feedback_weights(
+        self,
+        tenant_id: str,
+        user_id: str,
+        min_support: float = 2.0,
+        max_terms: int = 256,
+    ) -> FeedbackWeights:
+        tenant_id = _require_identifier(tenant_id, "tenant_id")
+        user_id = _require_identifier(user_id, "user_id")
+        if not isinstance(max_terms, int) or isinstance(max_terms, bool) or max_terms < 1:
+            raise ValueError("max_terms must be a positive integer")
+        self._require_ready()
+        rows = self._rows(
+            f"SELECT f.label AS label, a.fact_text AS fact_text, f.atom_id AS atom_id "
+            f"FROM {self._feedback} f JOIN {self._atoms} a "
+            "ON a.tenant_id = f.tenant_id AND a.user_id = f.user_id "
+            "AND a.atom_id = f.atom_id "
+            "WHERE f.tenant_id = ? AND f.user_id = ?",
+            (tenant_id, user_id),
+        )
+        return feedback_weights_from_rows(rows, float(min_support), max_terms)
+
     # -- erasure -----------------------------------------------------------
 
     def delete_user_data(self, tenant_id: str, user_id: str) -> dict[str, int]:
@@ -822,10 +941,15 @@ class SqliteStorage(StorageBackend):
                     f"DELETE FROM {self._policies} WHERE tenant_id = ? AND user_id = ?",
                     (tenant_id, user_id),
                 ).rowcount
+                feedback = conn.execute(
+                    f"DELETE FROM {self._feedback} WHERE tenant_id = ? AND user_id = ?",
+                    (tenant_id, user_id),
+                ).rowcount
         return {
             "turns": turns,
             "atoms": atoms,
             "edges": edges,
             "personas": personas,
             "policies": policies,
+            "feedback": feedback,
         }

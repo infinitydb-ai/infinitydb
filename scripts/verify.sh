@@ -44,6 +44,14 @@ print(f"smoke: recall OK (top hit is the current fact), contradictions={len(cont
       f"relations={len(rels) if hasattr(rels, '__len__') else 'n/a'}, persona={len(persona)} chars")
 SMOKE
 
+step "backend parity (SQLite vs PostgreSQL; same ranker, real server)"
+if "$PY" -c "import psycopg, pgserver" >/dev/null 2>&1; then
+  "$PY" benchmarks/arena/backend_parity.py --max-convos 1 --max-questions 40 --top-k 10 || FAILED=1
+else
+  echo 'skipped: pip install "infinitydb-ai[postgres]" pgserver'
+  echo 'The PostgreSQL path is optional; the default install does not need it.'
+fi
+
 step "published LoCoMo baseline (replay of the ingested arena databases)"
 if [ -d .arena/infinitydb ]; then
   "$PY" benchmarks/arena/replay_probe.py | tail -7 || FAILED=1

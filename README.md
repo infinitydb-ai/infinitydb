@@ -425,9 +425,32 @@ L3 persona state, L4 policies, L5 reinforcement and per-user erasure. Every
 operation is scoped to one `(tenant_id, user_id)`; on PostgreSQL each transaction
 binds the tenant with `SET LOCAL` and Row-Level Security is enabled and forced.
 
-Scope today: the core `InfinityDB` engine still uses its own SQLite schema and is
-not yet routed through this layer; the two can share one database file (the
-storage tables are prefixed `oams_`). See [docs/STORAGE.md](docs/STORAGE.md).
+The engine is wired to both. `InfinityDB(db_path=...)` is the dependency-free
+default and the path every published number was measured on;
+`InfinityDB(dsn=..., tenant_id=...)` runs the same extraction, turn-window
+scoring, chunk assembly, budget packing, persona resolution and provenance code
+on PostgreSQL:
+
+```python
+from infinitydb import InfinityDB
+
+db = InfinityDB(dsn="postgresql://user@host/infinitydb", tenant_id="acme")
+db.add("Caroline: I work at the hospital.", user_id="caroline", ts=1_700_000_000)
+db.recall("where does Caroline work", n=10, user_id="caroline")
+```
+
+Measured on LoCoMo (4 conversations, 99 sessions, 584 questions, `k=10`,
+[backend-parity-results.json](benchmarks/arena/backend-parity-results.json)):
+evidence recall@10 **87.97% SQLite vs 88.14% PostgreSQL**; per-question agreement
+573/582 (PostgreSQL gained 5, lost 4); at `budget_tokens=420` both score
+**69.07%**, with 9 gains and 9 losses. Returned payloads are not byte-identical
+(84/584) because FTS5 and tsvector order borderline candidates differently.
+Search p50/p95 is 64/103 ms on PostgreSQL against 16/23 ms on SQLite (local
+socket, pgserver 16.2, one connection): this is a deployment choice, not a
+latency win. SQLite is single-tenant per file; on PostgreSQL each tenant gets its
+own schema selected by the connection's `search_path`, so the engine's table
+names stay tenant-local even for a superuser that bypasses Row-Level Security.
+See [docs/STORAGE.md](docs/STORAGE.md).
 
 ---
 
