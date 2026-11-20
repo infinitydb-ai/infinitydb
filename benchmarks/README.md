@@ -301,8 +301,9 @@ Recorded beside the table, because each one bounds the claim:
 - **Abstention is not measured as accuracy.** The 30 unanswerable questions have no
   grounding turn, so the harness reports the top-1 score distribution instead:
   mean **27.67** lexical and **20.09** reranked, with **0%** of queries returning
-  nothing. No threshold is calibrated, so a low score is not yet a usable
-  "I don't know".
+  nothing. The engine does now expose a calibrated confidence and gate, measured
+  separately under "Calibrated abstention" below; it is not a usable
+  "I don't know" either.
 - **turn-all@10 of 18.72% is a property of `k=10` against ~550 turns**, not a
   failure of retrieval: 300 of the questions have more than one evidence session
   and one slot cannot hold them all.
@@ -353,6 +354,47 @@ band exists to keep that trade off the table.
 LoCoMo is unchanged by the tie-break in both arms measured here: 87.97% evidence
 recall@10 unbudgeted and 75.60% at the 420-token reranked budget. Both are set-based,
 which is why ordering cannot move them.
+
+
+### Calibrated abstention: implemented, measured, and negative
+
+`recall()` now always returns `confidence` (0–1), `abstain_recommended` and
+`confidence_threshold`, and `min_score=` / `abstain_on_low_confidence=True` filter
+on them. The signal is IDF-weighted coverage of the query's content terms in the
+best candidate, penalised when the query's rarest term is missing
+(`infinitydb/core/confidence.py`, pure stdlib); with a reranker it blends
+0.8 × the temperature-scaled cross-encoder logit with 0.2 × lexical coverage. The
+`_abs` questions have no grounding turn, so the harness scores a gate by whether
+it abstains on them and how much answerable retrieval it gives up.
+
+The hypothesis was that this separates answerable from unanswerable questions
+where the raw top-1 BM25 score does not (mean 27.67, with an *oracle-fit* threshold
+at 86.7% abstention recall for 45.7% answerable retention). It does not:
+
+| run | threshold | abstention recall | false abstention | balanced accuracy | best grid point |
+| --- | --- | --- | --- | --- | --- |
+| lexical | 0.42 | 43.3% | 48.5% | 0.474 | 70.0% / 66.0% @ 0.60 |
+| rerank top-8 INT8 | 0.45 | 46.7% | 32.8% | 0.569 | 66.7% / 43.6% @ 0.60 |
+
+All 500 questions (30 `_abs`, 470 answerable), `k=10`, `budget_tokens=600`
+([lexical](longmemeval-s-calibrated-results.json),
+[reranked](longmemeval-s-calibrated-rerank-results.json)). The lexical gate is at
+chance; the reranked blend is better but nowhere near the 80% true-abstention /
+<3% false-abstention target this was built for. No threshold on a 0.05 grid comes
+close, because the confidence distributions overlap: mean top confidence is 0.50
+for answerable vs 0.52 for `_abs` lexically, and 0.59 vs 0.48 reranked. Retrieval
+is unchanged by construction in both runs (91.91% / 70.85% / 48.30% / 18.72% and
+95.74% / 73.62% / 51.91% / 20.43% session-any/all, turn-any/all; MRR 0.8709 and
+0.9417), because the gate is off by default.
+
+Two things are recorded with it. Some `_abs` questions are confidently answered
+(three at 1.0 lexically) because the question names an entity the store does
+discuss while the *attribute* is missing, so term coverage really is 100% —
+coverage cannot see which part of the question is unanswerable. And the IDF sample
+costs latency on a store's first query after a write: +25 ms cold on a 3,000-atom
+tenant, +0.20 ms warm (+1.7%), which is why the lexical calibration run shows
+recall p50 25.1 ms against the published 13.3 ms — that harness queries each fresh
+store once.
 
 
 ### The matched-token win, and what it costs: an opt-in local reranker
