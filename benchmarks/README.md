@@ -11,6 +11,37 @@ The harness measures the checked-out Python InfinityDB implementation only. It r
 
 The committed JSON files from earlier benchmark runs are historical snapshots, not release certification. They must not be interpreted as current results or competitor comparisons. The historical scripts `benchmark.py` and `run_benchmark.py` are compatibility entry points that now invoke the reproducible single-engine harness.
 
+## Reproduce any published number in one command
+
+```bash
+./benchmarks/reproduce.sh --smoke   # ~25 s: 1 LoCoMo conversation + 6 LongMemEval questions
+./benchmarks/reproduce.sh           # ~25 min: 4 LoCoMo conversations and all 500 LongMemEval-S questions
+```
+
+The script refuses to run unless the checkout still declares `dependencies = []`, and
+records the commit, Python version and CPU count in
+`benchmarks/.cache/repro/environment.json`. It downloads the two datasets only when
+they are missing and verifies a pinned SHA-256 for each
+(`longmemeval_s_cleaned.json` `d6f21ea9…`, `locomo10.json` `79fa87e9…`), exiting
+non-zero on a mismatch, so a run cannot silently score a different corpus. A cached
+file with the wrong hash is rejected too, not reused.
+
+It then runs the harnesses that produced the committed artifacts —
+`locomo_local_compare.py` at the 420-token budget and `longmemeval_bench.py` at
+`k=10` with `budget_tokens=600` — and prints a Markdown scorecard with the
+reproduced numbers beside the committed baselines, written to
+`benchmarks/.cache/repro/scorecard.json`. `--backend postgres` runs LongMemEval-S
+against PostgreSQL (`INFINITYDB_DSN`); the LoCoMo harness has no PostgreSQL mode,
+so that row is reported as skipped rather than quietly measured on SQLite.
+
+The same thing runs on a clean runner: **Actions → Reproducible benchmarks → Run
+workflow**, choosing `smoke` or `full` and `sqlite` or `postgres`. The job installs
+`.[onnx,postgres]`, runs the script once, publishes the scorecard to the run
+summary, uploads the JSON as an artifact and attests its provenance with
+`actions/attest-build-provenance`. A green run reproduces that commit; it is not a
+certification. The smoke suite differs in question count by design, and its delta
+column is not a comparison.
+
 ## Competitor comparisons: the LoCoMo arena
 
 `benchmarks/arena/` runs real memory systems on the public LoCoMo dataset — InfinityDB, mem0 2.2.1 OSS (`infer=False`), an optional cross-encoder rerank row, and a free BM25 + dense `hybrid` control — with identical turns, questions, `top_k` and scoring, and keeps every raw retrieved-memory row:
