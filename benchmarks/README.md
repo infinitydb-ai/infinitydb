@@ -287,13 +287,14 @@ trade-off the LoCoMo reranker rows show.
 | temporal-reasoning | 127 | 89.8% → 95.3% | 63.0% → 67.7% |
 | knowledge-update | 72 | 98.6% → 100.0% | 54.2% → 56.9% |
 
-**The knowledge-update ordering result is still negative.** On the 71 questions
-where ordering applies, the newest valid version outranks the superseded one
-**46.5%** of the time lexically and **59.7%** with the reranker. Retrieving the
-right session is nearly solved (98.6% → 100.0%); ranking the *current* fact above
-the one it replaced is not. `recall()` has no recency term that survives a lexical
-tie, and the run deliberately uses `auto_supersede=False` with `now=question_date`
-so this is measured rather than hidden.
+**The knowledge-update ordering result was negative in these artifacts.** On the 71
+questions where ordering applies, the newest valid version outranks the superseded
+one **46.5%** of the time lexically and **59.7%** with the reranker, although the
+right session is retrieved 98.6–100% of the time. The run deliberately uses
+`auto_supersede=False` with `now=question_date` so this is measured rather than
+hidden. It is the number these two artifacts carry; the engine has since gained a
+recency tie-break that moves it to **77.5%** without changing any other retrieval
+number, described under "Knowledge-update ordering: a recency tie-break" below.
 
 Recorded beside the table, because each one bounds the claim:
 
@@ -310,6 +311,48 @@ Recorded beside the table, because each one bounds the claim:
 - One host, 8 cores, one run per configuration; the artifacts carry the dataset
   sha256, run fingerprint and per-question rows (`longmemeval-s-lexical.json`,
   `longmemeval-s-results.json`).
+
+
+### Knowledge-update ordering: a recency tie-break, not a decay
+
+The measurement above says the right session is almost always retrieved and only
+the order is wrong: **95% of the ordering failures return both the newest and the
+superseded session**. So the fix is ordering, not retrieval.
+
+`recall()` now re-orders the memories it is already returning: when two adjacent
+memories are within `_RECENCY_TIE_BAND` (0.45) of each other's score, the newer one
+(`ts`) goes first. Four details make it safe:
+
+- **It runs after budget packing.** Ordering earlier changes which memories survive
+  `budget_tokens`, which is exactly what the recall columns measure. The first
+  version of this change ordered before packing and cost 3.4 points of session-all
+  and 5.8 points of turn-any on multi-session questions.
+- **It is a band, not a multiplier.** A blanket recency decay was measured earlier
+  and demoted the older sessions that long-horizon questions ask about.
+- **Historical-intent queries skip it.** `used to`, `previously`, `originally`,
+  `before`, `old`, `first time` go through un-reordered: those questions want the
+  superseded value.
+- **With a reranker the band is additive** (`_RECENCY_CE_DELTA = 0.5` over the
+  cross-encoder logit), because logits are not ratio-scaled.
+
+Full 500 questions, `k=10`, `budget_tokens=600`, lexical, one run per row:
+
+| band | newest > stale | session-any | session-all | turn-any | turn-all | MRR |
+| --- | --- | --- | --- | --- | --- | --- |
+| off (published artifact) | 46.5% | 91.91% | 70.85% | 48.30% | 18.72% | 0.8789 |
+| **0.45 (shipped)** | **77.5%** | 91.91% | 70.85% | 48.30% | 18.72% | 0.8709 |
+| 0.25 | 87.3% | 91.91% | 70.85% | 48.30% | 18.72% | 0.8446 |
+
+Recall is identical by construction; the price is MRR, because the evidence for a
+temporal question is often not the newest memory in the list. 0.25 buys another 9.8
+points of ordering for four times the MRR cost (−0.034 against −0.008), which is why
+0.45 ships. For scale, an earlier variant that sorted candidates newest-first
+*before* packing reached 98.3% newest>stale and lost 12 points of session-any — the
+band exists to keep that trade off the table.
+
+LoCoMo is unchanged by the tie-break in both arms measured here: 87.97% evidence
+recall@10 unbudgeted and 75.60% at the 420-token reranked budget. Both are set-based,
+which is why ordering cannot move them.
 
 
 ### The matched-token win, and what it costs: an opt-in local reranker
