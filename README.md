@@ -488,7 +488,31 @@ The legacy `benchmarks/benchmark.py` and `benchmarks/run_benchmark.py` commands 
 
 ## Integrations
 
-Example adapters for leading agent frameworks live in [`examples/`](examples/) in this repository. They are **not** packaged in the PyPI wheel: `pip install infinitydb-ai` gives you the engine and the MCP server, so clone the repo if you want these adapters. No cloud required.
+Example adapters for leading agent frameworks live in [`examples/`](examples/) in this repository. They are **not** packaged in the PyPI wheel: `pip install infinitydb-ai` gives you the engine and the MCP server, so clone the repo if you want these adapters. No cloud required. The exception is the LangGraph store below, which ships in the wheel behind an optional extra.
+
+### LangGraph
+A drop-in `langgraph.store.base.BaseStore`, so any LangGraph agent that takes a
+`store=` gets InfinityDB's ranking instead of an in-memory dict.
+`put`/`aput` ingest deterministically (no LLM call: 32.9 ms p50 per session on
+SQLite, 2.20 ms p50 per `add()` across the 100k-atom PostgreSQL run), and
+`search`/`asearch` call `recall()`, optionally with a token budget or the local
+ONNX reranker.
+```bash
+pip install "infinitydb-ai[langgraph]"
+```
+```python
+from infinitydb.integrations.langgraph import InfinityDBStore
+
+store = InfinityDBStore(db_path="agent_memory.db")
+# or, multi-tenant: InfinityDBStore(dsn="postgresql://...", tenant_id="acme")
+
+store.put(("acme", "alice", "preferences"), "diet", {"rule": "vegetarian"})
+store.search(("acme", "alice"), query="dietary restrictions", limit=5)
+```
+Namespaces map to engine `user_id`s, so recall never crosses a namespace.
+`GetOp`, `PutOp`, `SearchOp` and `ListNamespacesOp` are implemented for both
+`batch()` and `abatch()`, including metadata filters, TTL expiry/refresh and
+namespace prefix/suffix/depth queries.
 
 ### LangChain
 Compatible with LangChain chains and agents.
