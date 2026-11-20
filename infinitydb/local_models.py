@@ -29,6 +29,7 @@ because both cost latency and the measured trade-off is published in
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
@@ -77,10 +78,28 @@ def local_embedder(
 
 
 def _cache_root(cache_dir: str | None) -> Path:
+    """Where the INT8 weights and their HF downloads live.
+
+    The first answer wins: an explicit ``cache_dir``, then
+    ``$INFINITYDB_ONNX_CACHE``, then fastembed's own default when that version
+    exposes one, then the usual per-user cache directory. FastEmbed renamed
+    its private helper (``get_cache_dir`` became ``define_cache_dir`` in 0.9),
+    so neither name is required: when both are missing the models still cache
+    in a stable place instead of the call crashing.
+    """
     if cache_dir:
         return Path(cache_dir)
-    get_cache_dir = _load("fastembed.common.utils", "get_cache_dir")
-    return Path(get_cache_dir())
+    configured = os.environ.get("INFINITYDB_ONNX_CACHE")
+    if configured:
+        return Path(configured)
+    for name in ("define_cache_dir", "get_cache_dir"):
+        try:
+            helper = _load("fastembed.common.utils", name)
+        except ImportError:
+            continue
+        return Path(helper())
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "infinitydb" / "onnx"
 
 
 def _quantized_reranker(
