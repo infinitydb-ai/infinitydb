@@ -242,6 +242,75 @@ python benchmarks/arena/longmemeval_probe.py --path benchmarks/arena/data/longme
 180 of 500 questions are covered in `arena/results/longmemeval/infinitydb-k5.jsonl`:
 recall@5 **0.9333**, median context 534 words, median latency 15.16 ms.
 
+### The full 500 questions, and what the reranker buys there
+
+`longmemeval_bench.py` is the question-level harness. It ingests every haystack
+turn of one question into a fresh store, asks `recall(k=10)`, and scores what came
+back against the turns and sessions the dataset marks with `has_answer`. Hits are
+resolved through `l0_logs` provenance, not by comparing returned text to evidence
+strings, so a hit means the memory was actually retrieved. It checkpoints per
+question, so an interrupted run resumes.
+
+```
+curl -L -o benchmarks/data/longmemeval_s_cleaned.json \
+  https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json
+python benchmarks/longmemeval_bench.py --data-path benchmarks/data/longmemeval_s_cleaned.json \
+  --output benchmarks/longmemeval-s-lexical.json
+python benchmarks/longmemeval_bench.py --data-path benchmarks/data/longmemeval_s_cleaned.json \
+  --rerank-model Xenova/ms-marco-MiniLM-L-6-v2 --rerank-top-k 8 --quantize-rerank \
+  --output benchmarks/longmemeval-s-results.json
+```
+
+All 500 questions, `k=10`, `budget_tokens=600`, `tiktoken/cl100k_base`, in-memory
+SQLite per question, `longmemeval_s_cleaned.json` sha256 `d6f21ea9…`, commit
+`0f950ae`. 470 answerable questions and 30 abstention questions; **no reader and no
+judge** — every number below is retrieval.
+
+| configuration | session-any@10 | session-all@10 | turn-any@10 | turn-all@10 | MRR | tokens/q | search p50 | ingest p50 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| default lexical | 91.91% | 70.85% | 48.30% | 18.72% | 0.8789 | 563.5 | 13.3 ms | 2.11 s |
+| `rerank_top_k=8`, INT8 MiniLM | **95.74%** | **73.62%** | **51.91%** | **20.43%** | **0.9424** | 562.2 | 182.0 ms | 2.15 s |
+
+Paired per question on the same 500 questions, the reranked run gains 18 and loses
+0 on session-any (exact McNemar **p = 8e-6**), gains 22 and loses 5 on turn-any
+(p = 0.0015), gains 24 and loses 11 on session-all (p = 0.041) and gains 8 and
+loses 0 on turn-all (p = 0.0078). The reranker buys 3.83 points of session-any for
+**13.7× the search latency** and no measurable token cost, which is the same
+trade-off the LoCoMo reranker rows show.
+
+| ability | n | session-any lexical → rerank | turn-any lexical → rerank |
+| --- | --- | --- | --- |
+| single-session-user | 64 | 98.4% → 100.0% | 28.1% → 28.1% |
+| single-session-assistant | 56 | 92.9% → 96.4% | 8.9% → 8.9% |
+| single-session-preference | 30 | 56.7% → 73.3% | 20.0% → 30.0% |
+| multi-session | 121 | 95.0% → 96.7% | 65.3% → 70.2% |
+| temporal-reasoning | 127 | 89.8% → 95.3% | 63.0% → 67.7% |
+| knowledge-update | 72 | 98.6% → 100.0% | 54.2% → 56.9% |
+
+**The knowledge-update ordering result is still negative.** On the 71 questions
+where ordering applies, the newest valid version outranks the superseded one
+**46.5%** of the time lexically and **59.7%** with the reranker. Retrieving the
+right session is nearly solved (98.6% → 100.0%); ranking the *current* fact above
+the one it replaced is not. `recall()` has no recency term that survives a lexical
+tie, and the run deliberately uses `auto_supersede=False` with `now=question_date`
+so this is measured rather than hidden.
+
+Recorded beside the table, because each one bounds the claim:
+
+- **Abstention is not measured as accuracy.** The 30 unanswerable questions have no
+  grounding turn, so the harness reports the top-1 score distribution instead:
+  mean **27.67** lexical and **20.09** reranked, with **0%** of queries returning
+  nothing. No threshold is calibrated, so a low score is not yet a usable
+  "I don't know".
+- **turn-all@10 of 18.72% is a property of `k=10` against ~550 turns**, not a
+  failure of retrieval: 300 of the questions have more than one evidence session
+  and one slot cannot hold them all.
+- **Ingest dominates** at ~2.1 s per question for ~550 turns, unchanged by the
+  reranker because nothing is embedded at write time.
+- One host, 8 cores, one run per configuration; the artifacts carry the dataset
+  sha256, run fingerprint and per-question rows (`longmemeval-s-lexical.json`,
+  `longmemeval-s-results.json`).
+
 
 ### The matched-token win, and what it costs: an opt-in local reranker
 

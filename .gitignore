@@ -20,3 +20,7 @@ benchmarks/arena/data/
 benchmarks/arena/results/*.db
 benchmarks/arena/results/*.db-wal
 benchmarks/arena/results/*.db-shm
+
+# Per-question checkpoints written by the LongMemEval harness (resume state,
+# duplicated by the .json result next to them)
+benchmarks/*.jsonl
