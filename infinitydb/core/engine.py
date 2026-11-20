@@ -182,6 +182,84 @@ _RANKED_CANDIDATE_CAP = 400
 # `budget_tokens` or pass a smaller `max_chunk_turns`.
 _MAX_CHUNK_TURNS = 12
 
+# Recency tie-break band for returned chunks. A blanket recency multiplier is
+# measured-harmful here (it demotes the older sessions long-horizon questions
+# ask about), but a *tie-break* is not: when two chunks are within this ratio of
+# each other, the newer one is preferred. 1.0 disables the tie-break (only exact
+# ties move); smaller values widen the band. Measured on LongMemEval-S
+# knowledge-update ordering in benchmarks/README.md.
+_RECENCY_TIE_BAND = 0.45
+
+# The same tie-break for cross-encoder logits, which are additive rather than
+# ratio-scaled: chunks whose logits are within this many nats of the chunk above
+# them count as tied, and the newer one wins.
+_RECENCY_CE_DELTA = 0.5
+
+
+# Questions that ask about a past state. The recency tie-break is skipped for
+# these: "what did I use to drive" wants the superseded fact, not the newest one.
+_HISTORICAL_QUERY_RE = re.compile(
+    r"\b(used to|previously|formerly|originally|in the past|back then|earlier|"
+    r"before|prior to|at first|first time|old|older|oldest|last time|"
+    r"what did .{0,40} before|how did .{0,40} use)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_historical_query(query: str) -> bool:
+    """Return True when the query asks about a superseded/earlier state."""
+    return bool(_HISTORICAL_QUERY_RE.search(query or ""))
+
+
+def _recency_band_order(
+    items: list[dict[str, Any]],
+    *,
+    band: float = _RECENCY_TIE_BAND,
+    ce_delta: float = _RECENCY_CE_DELTA,
+) -> list[dict[str, Any]]:
+    """Prefer newer items when their relevance is within a tie band.
+
+    ``items`` arrives in descending relevance order. Consecutive items are
+    near-tied when the score that ordered them is within ``band`` (a ratio, for
+    lexical scores) or within ``ce_delta`` (an additive window, for
+    cross-encoder logits). Near-tied runs are re-sorted newest-first; anything
+    outside the band keeps its relevance order, so a clearly better chunk still
+    wins. Chunks scored by different rankers never share a band.
+    """
+    if len(items) < 2:
+        return items
+
+    ordered: list[dict[str, Any]] = []
+    group: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        if len(group) > 1:
+            group.sort(key=lambda item: float(item.get("ts") or 0.0), reverse=True)
+        ordered.extend(group)
+        group.clear()
+
+    for item in items:
+        if not group:
+            group.append(item)
+            continue
+        lead = group[0]
+        lead_ce, cur_ce = lead.get("_ce"), item.get("_ce")
+        if lead_ce is not None and cur_ce is not None:
+            near = (float(lead_ce) - float(cur_ce)) <= ce_delta
+        elif lead_ce is None and cur_ce is None:
+            lead_raw = float(lead.get("_raw") or 0.0)
+            cur_raw = float(item.get("_raw") or 0.0)
+            near = lead_raw > 0.0 and cur_raw >= band * lead_raw
+        else:
+            near = False
+        if near:
+            group.append(item)
+        else:
+            flush()
+            group.append(item)
+    flush()
+    return ordered
+
 
 class InfinityDB:
     """InfinityDB L0-L6 Brain Engine.
@@ -1561,7 +1639,8 @@ class InfinityDB:
             # Turn windows are ranked by lexical relevance alone. Recency is
             # already expressed in the returned event dates, and a decay
             # multiplier here measurably demotes the older sessions that
-            # long-horizon questions ask about.
+            # long-horizon questions ask about. It is applied later as a
+            # tie-break inside a relevance band instead (_recency_band_order).
             retention = 1.0
             ranked.append({
                 "id": row["atom_id"],
@@ -1640,6 +1719,8 @@ class InfinityDB:
             head = chunks if rerank_top_k is None else chunks[:rerank_top_k]
             scores = list(rerank(query, ["\n".join(c["_turns"]) for c in head]))
             if len(scores) == len(head):
+                for chunk, score in zip(head, scores):
+                    chunk["_ce"] = float(score)
                 order = sorted(range(len(head)), key=lambda i: -float(scores[i]))
                 tail = chunks[len(head):] if rerank_top_k is not None else []
                 chunks = ([head[i] for i in order] + tail)[:n]
@@ -1652,6 +1733,11 @@ class InfinityDB:
                 "score": chunk["score"],
                 "retention": chunk["retention"],
                 "ts": chunk["ts"],
+                # Ranking keys, kept only until ``recall`` has ordered the
+                # returned set; ``_raw`` is the lexical score and ``_ce`` the
+                # cross-encoder logit when a reranker ran.
+                "_raw": chunk["_raw"],
+                **({"_ce": chunk["_ce"]} if "_ce" in chunk else {}),
             }
             for chunk in chunks
         ]
@@ -2128,6 +2214,16 @@ class InfinityDB:
                     if used >= budget_tokens:
                         break
                 top_k = packed
+
+        # Recency breaks ties only, and only over the set that is already being
+        # returned. Ordering here rather than before the budget pass keeps the
+        # returned set (and therefore retrieval recall) identical; it decides
+        # which of two near-tied memories the reader sees first.
+        if top_k and not _is_historical_query(query):
+            top_k = _recency_band_order(top_k)
+        for item in top_k:
+            item.pop("_raw", None)
+            item.pop("_ce", None)
 
         # Reinforce only the memories actually returned to the caller.
         top_ids = [item["id"] for item in top_k]
