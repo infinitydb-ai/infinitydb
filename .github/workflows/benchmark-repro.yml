@@ -1,0 +1,85 @@
+name: Reproducible benchmarks
+
+# Runs the same harnesses that produced the committed artifacts, on a clean
+# runner, and publishes the consolidated scorecard as a build artifact with
+# GitHub-signed provenance. Manual only: it is a reproduction tool, not a gate.
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "smoke = 1 conversation + 6 questions; full = both published suites"
+        type: choice
+        options: [smoke, full]
+        default: smoke
+      backend:
+        description: "Storage backend for LongMemEval-S (LoCoMo is SQLite-only)"
+        type: choice
+        options: [sqlite, postgres]
+        default: sqlite
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[onnx,postgres]" tiktoken
+
+      - name: Start PostgreSQL 16 with pgvector
+        if: inputs.backend == 'postgres'
+        run: |
+          docker run -d --name pg -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
+          for _ in $(seq 1 30); do
+            if docker exec pg pg_isready -U postgres; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs pg
+          exit 1
+
+      - name: Reproduce
+        env:
+          INFINITYDB_DSN: ${{ inputs.backend == 'postgres' && 'postgresql://postgres:postgres@localhost:5432/postgres' || '' }}
+        run: |
+          ./benchmarks/reproduce.sh --${{ inputs.suite }} --backend ${{ inputs.backend }}
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f benchmarks/.cache/repro/scorecard.json ]; then
+            python -c 'import json; print(json.load(open("benchmarks/.cache/repro/scorecard.json"))["markdown"])' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-scorecard-${{ inputs.suite }}-${{ inputs.backend }}
+          path: |
+            benchmarks/.cache/repro/scorecard.json
+            benchmarks/.cache/repro/environment.json
+            benchmarks/.cache/repro/locomo-*.json
+            benchmarks/.cache/repro/longmemeval-*.json
+          if-no-files-found: warn
+
+      - name: Attest scorecard provenance
+        if: hashFiles('benchmarks/.cache/repro/scorecard.json') != ''
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: benchmarks/.cache/repro/scorecard.json
