@@ -391,6 +391,9 @@ def run_question(
         "returned_items": len(items),
         "context_tokens": context_tokens,
         "top1_score": round(top1_score, 4),
+        "confidence": float(result.get("confidence", 0.0) or 0.0),
+        "abstain_recommended": bool(result.get("abstain_recommended")),
+        "confidence_threshold": float(result.get("confidence_threshold", 0.0) or 0.0),
         "ingest_seconds": round(ingest_seconds, 3),
         "search_ms": round(search_ms, 2),
         "session_any_hit": False,
@@ -510,6 +513,62 @@ def best_confidence_gate(
     return best
 
 
+def calibrated_gate(
+    abstention_rows: list[dict[str, Any]],
+    answerable_rows: list[dict[str, Any]],
+    threshold: float,
+) -> dict[str, Any] | None:
+    """Score the calibrated gate at a fixed threshold (no fitting on the data).
+
+    A question abstains when its top candidate's confidence is below
+    ``threshold``; the ideal gate abstains on every ``_abs`` question and on no
+    answerable one.
+    """
+    if not abstention_rows or not answerable_rows:
+        return None
+
+    def abstains(row: dict[str, Any]) -> bool:
+        return float(row.get("confidence", 0.0)) < threshold
+
+    true_positive = sum(1 for row in abstention_rows if abstains(row))
+    false_positive = sum(1 for row in answerable_rows if abstains(row))
+    sensitivity = true_positive / len(abstention_rows)
+    specificity = 1.0 - false_positive / len(answerable_rows)
+    return {
+        "threshold": round(float(threshold), 4),
+        "true_abstention_rate_pct": round(100.0 * sensitivity, 2),
+        "false_abstention_rate_pct": round(100.0 * (1.0 - specificity), 2),
+        "answerable_retention_pct": round(100.0 * specificity, 2),
+        "balanced_accuracy": round((sensitivity + specificity) / 2.0, 4),
+        "threshold_fitted_on_this_set": False,
+    }
+
+
+def threshold_sweep(
+    abstention_rows: list[dict[str, Any]],
+    answerable_rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Fixed-grid frontier of the abstention trade-off.
+
+    The best point on the grid is still selected on the questions it is scored
+    on, so it is a diagnostic of achievable separation, not a deployable
+    operating point. The engine's default threshold is scored separately by
+    ``calibrated_gate``.
+    """
+    points = []
+    for step in range(1, 20):
+        point = calibrated_gate(abstention_rows, answerable_rows, step / 20.0)
+        if point is not None:
+            points.append(point)
+    if not points:
+        return None
+    best = max(points, key=lambda point: point["balanced_accuracy"])
+    return {
+        "grid": points,
+        "best_balanced_accuracy": {**best, "selected_in_sample": True},
+    }
+
+
 def summarize_slice(rows: list[dict[str, Any]], abstention: bool) -> dict[str, Any]:
     if not rows:
         return {"questions": 0}
@@ -521,6 +580,10 @@ def summarize_slice(rows: list[dict[str, Any]], abstention: bool) -> dict[str, A
         "tokens_per_query": round(mean_tokens, 1),
         "mean_top1_score": round(statistics.fmean(row["top1_score"] for row in rows), 4),
     }
+
+    summary["mean_confidence"] = round(
+        statistics.fmean(row.get("confidence", 0.0) for row in rows), 4
+    )
 
     if abstention:
         summary["empty_result_rate_pct"] = round(
@@ -606,6 +669,16 @@ def summarize(
     )
     if gate:
         results["overall"]["abstention_diagnostics"]["confidence_gate"] = gate
+
+    default_thresholds = {
+        float(row.get("confidence_threshold", 0.0)) for row in rows
+    }
+    if abstention_rows and answerable and len(default_thresholds) == 1:
+        diagnostics = results["overall"]["abstention_diagnostics"]
+        diagnostics["calibrated_gate"] = calibrated_gate(
+            abstention_rows, answerable, next(iter(default_thresholds))
+        )
+        diagnostics["threshold_sweep"] = threshold_sweep(abstention_rows, answerable)
 
     if has_judge and rows:
         accuracy = 100.0 * sum(bool(row.get("judge_correct")) for row in rows) / len(rows)

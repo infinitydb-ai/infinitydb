@@ -21,6 +21,7 @@ import re
 from array import array
 from collections import Counter
 
+from infinitydb.core.confidence import compute_corpus_idf, score_candidates_confidence
 from infinitydb.storage.engine import open_engine_store
 
 
@@ -195,6 +196,12 @@ _RECENCY_TIE_BAND = 0.45
 # them count as tied, and the newer one wins.
 _RECENCY_CE_DELTA = 0.5
 
+# Atoms sampled from the tenant's store to weight query terms for calibrated
+# confidence. The cached corpus statistics cost one indexed read per write, not
+# per query; the cap keeps a recall on a very large tenant from scanning the
+# whole table on the query path.
+_CONFIDENCE_CORPUS_LIMIT = 5000
+
 
 # Questions that ask about a past state. The recency tie-break is skipped for
 # these: "what did I use to drive" wants the superseded fact, not the newest one.
@@ -312,6 +319,11 @@ class InfinityDB:
         # Stemmed token counts per turn window, keyed by the row identity. Windows
         # are immutable between writes, so this is cleared whenever turns change.
         self._window_terms: dict[int, Counter] = {}
+        # (key, (idf, n_docs)) for the tenant corpus used by confidence scoring;
+        # the key carries the atom count and newest timestamp so writes invalidate it.
+        self._confidence_corpus_cache: (
+            tuple[tuple[Any, ...], tuple[dict[str, float], int]] | None
+        ) = None
 
         self._init_schema()
 
@@ -1983,6 +1995,39 @@ class InfinityDB:
             for cand in packed
         ]
 
+    def _confidence_corpus(
+        self, user_id: str | None
+    ) -> tuple[dict[str, float], int] | None:
+        """IDF weights over a bounded sample of the tenant's stored facts.
+
+        Returns ``(idf, n_docs)`` or ``None`` when the caller did not scope by
+        user; the confidence scorer then falls back to the retrieved candidates
+        as its corpus. The single-entry cache is keyed on the atom count and the
+        newest timestamp, so any write invalidates it.
+        """
+        if not user_id:
+            return None
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n, MAX(ts) AS newest FROM l1_atoms WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        n_atoms = int((row["n"] if row else 0) or 0)
+        if n_atoms == 0:
+            return None
+        key = (user_id, n_atoms, float((row["newest"] if row else 0.0) or 0.0))
+        cached = self._confidence_corpus_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        rows = self.conn.execute(
+            "SELECT fact FROM l1_atoms WHERE user_id = ? "
+            "ORDER BY ts DESC, id DESC LIMIT ?",
+            (user_id, _CONFIDENCE_CORPUS_LIMIT),
+        ).fetchall()
+        texts = [str(item["fact"] or "") for item in rows]
+        stats = (compute_corpus_idf(texts), len(texts))
+        self._confidence_corpus_cache = (key, stats)
+        return stats
+
     def recall(
         self,
         query: str,
@@ -2007,6 +2052,9 @@ class InfinityDB:
         learned_boost: float = 0.0,
         assembly_depth: int | None = None,
         max_chunk_turns: int = _MAX_CHUNK_TURNS,
+        min_score: float | None = None,
+        abstain_on_low_confidence: bool = False,
+        rerank_calibration: tuple[float, float] = (-1.5, 2.0),
     ) -> dict[str, Any]:
         """Hybrid memory recall combining BM25 keyword matching, causal links,
 
@@ -2046,6 +2094,16 @@ class InfinityDB:
         pass per passage, so this is the difference between reranking 30
         candidates and reranking 8; the measured effect of each setting is in
         ``benchmarks/README.md``.
+
+        ``min_score`` and ``abstain_on_low_confidence`` turn the calibrated
+        confidence signal into a gate. With neither set (the default) nothing is
+        filtered and every result is returned exactly as before; ``confidence``,
+        ``abstain_recommended`` and ``confidence_threshold`` are simply added to
+        the response. Passing ``min_score`` (or ``abstain_on_low_confidence=True``)
+        drops candidates whose confidence is below the threshold, which is how a
+        caller gets ``results: []`` back for a question the store cannot answer.
+        ``rerank_calibration`` is the ``(shift, temperature)`` pair used to map
+        cross-encoder logits onto [0, 1]; see ``infinitydb.core.confidence``.
 
         ``session_id`` and ``entities`` restrict the search space before ranking:
         only memories from that session, and only memories mentioning every
@@ -2095,6 +2153,29 @@ class InfinityDB:
             or rerank_top_k < 1
         ):
             raise ValueError("rerank_top_k must be a positive integer or None")
+        if min_score is not None and (
+            isinstance(min_score, bool)
+            or not isinstance(min_score, (int, float))
+            or not math.isfinite(float(min_score))
+            or not 0.0 <= float(min_score) <= 1.0
+        ):
+            raise ValueError("min_score must be a number between 0 and 1 or None")
+        if not isinstance(abstain_on_low_confidence, bool):
+            raise TypeError("abstain_on_low_confidence must be a boolean")
+        if not (
+            isinstance(rerank_calibration, (tuple, list))
+            and len(rerank_calibration) == 2
+            and all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in rerank_calibration
+            )
+            and math.isfinite(float(rerank_calibration[0]))
+            and math.isfinite(float(rerank_calibration[1]))
+            and float(rerank_calibration[1]) > 0.0
+        ):
+            raise ValueError(
+                "rerank_calibration must be a (shift, temperature) pair with temperature > 0"
+            )
         if dense is not None:
             if not (isinstance(dense, (tuple, list)) and len(dense) == 3):
                 raise TypeError("dense must be a (embedder, model, weight) tuple or None")
@@ -2188,6 +2269,23 @@ class InfinityDB:
                 if len(top_k) == n:
                     break
 
+        # Calibrated [0, 1] confidence, and the optional abstention gate. This
+        # runs before the token budget hands out slots because the gate asks
+        # whether the store holds evidence at all, not whether it fits in this
+        # call's budget. Filtering here therefore returns [] for a question the
+        # store cannot answer instead of a context window of weak matches.
+        shift, temperature = rerank_calibration
+        top_k, confidence_meta = score_candidates_confidence(
+            query=query,
+            candidates=top_k,
+            corpus_statistics=self._confidence_corpus(user_id),
+            has_reranker=rerank is not None,
+            rerank_shift=float(shift),
+            rerank_temperature=float(temperature),
+            min_score=min_score,
+            abstain_on_low_confidence=abstain_on_low_confidence,
+        )
+
         # Pack the highest-ranked memories into an explicit budget. Merged turn
         # chunks are split back into turns first, so a small budget buys several
         # independent chances at the evidence instead of two or three large
@@ -2276,6 +2374,9 @@ class InfinityDB:
 
         return {
             "results": top_k,
+            "confidence": confidence_meta["confidence"],
+            "abstain_recommended": confidence_meta["abstain_recommended"],
+            "confidence_threshold": confidence_meta["confidence_threshold"],
             "causal_graph": causal_insights,
             "policies": relevant_policies,
             "latency_ms": round(elapsed_ms, 2),
