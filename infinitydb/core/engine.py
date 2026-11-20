@@ -21,7 +21,11 @@ import re
 from array import array
 from collections import Counter
 
-from infinitydb.core.confidence import compute_corpus_idf, score_candidates_confidence
+from infinitydb.core.confidence import (
+    DEFAULT_ABSTAIN_THRESHOLD,
+    compute_corpus_idf,
+    score_query_confidence,
+)
 from infinitydb.storage.engine import open_engine_store
 
 
@@ -2100,8 +2104,10 @@ class InfinityDB:
         filtered and every result is returned exactly as before; ``confidence``,
         ``abstain_recommended`` and ``confidence_threshold`` are simply added to
         the response. Passing ``min_score`` (or ``abstain_on_low_confidence=True``)
-        drops candidates whose confidence is below the threshold, which is how a
-        caller gets ``results: []`` back for a question the store cannot answer.
+        returns ``results: []`` when the gate abstains, which is how a caller
+        distinguishes "the store cannot answer this" from "here is a weak match".
+        The gate runs *after* budget packing and the recency tie-break, so it can
+        only empty the result set and never reorders or re-selects it.
         ``rerank_calibration`` is the ``(shift, temperature)`` pair used to map
         cross-encoder logits onto [0, 1]; see ``infinitydb.core.confidence``.
 
@@ -2269,23 +2275,6 @@ class InfinityDB:
                 if len(top_k) == n:
                     break
 
-        # Calibrated [0, 1] confidence, and the optional abstention gate. This
-        # runs before the token budget hands out slots because the gate asks
-        # whether the store holds evidence at all, not whether it fits in this
-        # call's budget. Filtering here therefore returns [] for a question the
-        # store cannot answer instead of a context window of weak matches.
-        shift, temperature = rerank_calibration
-        top_k, confidence_meta = score_candidates_confidence(
-            query=query,
-            candidates=top_k,
-            corpus_statistics=self._confidence_corpus(user_id),
-            has_reranker=rerank is not None,
-            rerank_shift=float(shift),
-            rerank_temperature=float(temperature),
-            min_score=min_score,
-            abstain_on_low_confidence=abstain_on_low_confidence,
-        )
-
         # Pack the highest-ranked memories into an explicit budget. Merged turn
         # chunks are split back into turns first, so a small budget buys several
         # independent chances at the evidence instead of two or three large
@@ -2319,6 +2308,27 @@ class InfinityDB:
         # which of two near-tied memories the reader sees first.
         if top_k and not _is_historical_query(query):
             top_k = _recency_band_order(top_k)
+
+        # Calibrated [0, 1] confidence, and the optional abstention gate. It
+        # runs after packing and after the recency tie-break, so it can only
+        # empty the result set for a question the store cannot answer; it can
+        # never change which memories a call returns or their order.
+        shift, temperature = rerank_calibration
+        confidence_meta = score_query_confidence(
+            query=query,
+            results=top_k,
+            corpus_statistics=self._confidence_corpus(user_id),
+            threshold=(
+                float(min_score) if min_score is not None else DEFAULT_ABSTAIN_THRESHOLD
+            ),
+            has_reranker=rerank is not None,
+            rerank_shift=float(shift),
+            rerank_temperature=float(temperature),
+        )
+        if (
+            min_score is not None or abstain_on_low_confidence
+        ) and confidence_meta["abstain_recommended"]:
+            top_k = []
         for item in top_k:
             item.pop("_raw", None)
             item.pop("_ce", None)

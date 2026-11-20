@@ -5,6 +5,7 @@ from infinitydb.core.confidence import (
     compute_corpus_idf,
     compute_lexical_confidence,
     score_candidates_confidence,
+    score_query_confidence,
 )
 from infinitydb.core.engine import InfinityDB
 
@@ -80,6 +81,81 @@ def test_score_candidates_confidence_filters_when_min_score_set() -> None:
     )
     assert filtered == []
     assert meta_gated["abstain_recommended"] is True
+
+
+def test_top3_union_covers_evidence_split_across_slots() -> None:
+    tenant = [
+        "I met Priya at the Pune office.",
+        "We discussed the Falcon migration in depth.",
+        "Lunch was at the cafeteria.",
+    ]
+    results = [
+        {"atom_id": "a1", "fact": tenant[0]},
+        {"atom_id": "a2", "fact": tenant[1]},
+    ]
+    meta = score_query_confidence(
+        "What did Priya say about Falcon?", results, tenant, threshold=0.6
+    )
+    best_only = score_query_confidence(
+        "What did Priya say about Falcon?",
+        results,
+        tenant,
+        threshold=0.6,
+        union_weight=0.0,
+        best_weight=1.0,
+    )
+    # One entity per item: the best single item covers half, the top-3 union all.
+    assert best_only["abstain_recommended"] is True
+    assert meta["abstain_recommended"] is False
+    assert meta["confidence"] > best_only["confidence"]
+
+
+def test_missing_anchor_halves_coverage() -> None:
+    tenant = [
+        "I met Priya at the Pune office.",
+        "We discussed the Falcon migration in depth.",
+    ]
+    results = [{"atom_id": "a2", "fact": tenant[1]}]
+    penalised = score_query_confidence(
+        "What did Priya say about Falcon?", results, tenant, threshold=0.45
+    )
+    unpenalised = score_query_confidence(
+        "What did Priya say about Falcon?",
+        results,
+        tenant,
+        threshold=0.45,
+        anchor_penalty=1.0,
+    )
+    assert penalised["confidence"] == round(unpenalised["confidence"] / 2.0, 4)
+
+
+def test_empty_results_always_abstain() -> None:
+    meta = score_query_confidence("What is my cat's vet number?", [], ["Rust is my language."])
+    assert meta["abstain_recommended"] is True
+    assert meta["confidence"] == 0.0
+
+
+def test_gate_cannot_change_returned_ranking(tmp_path) -> None:
+    db = InfinityDB(db_path=tmp_path / "gate.db")
+    try:
+        db.add("I booked a flight to Kyoto for November 12.", user_id="u", session_id="s1")
+        db.add("Kyoto has a famous bamboo forest.", user_id="u", session_id="s2")
+        db.add("My favourite programming language is Rust.", user_id="u", session_id="s3")
+
+        kwargs = {"n": 5, "user_id": "u", "reinforce": False}
+        ungated = db.recall(query="Where did I book a flight to?", **kwargs)
+        gated = db.recall(
+            query="Where did I book a flight to?",
+            min_score=0.95,
+            **kwargs,
+        )
+        # A high threshold may empty the list but is not allowed to re-rank it.
+        assert [item["id"] for item in gated["results"]] == [
+            item["id"] for item in ungated["results"]
+        ] or gated["results"] == []
+        assert ungated["results"], "answerable query must retrieve something"
+    finally:
+        db.close()
 
 
 def test_engine_recall_abstention_end_to_end(tmp_path) -> None:

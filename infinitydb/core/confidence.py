@@ -47,6 +47,9 @@ _STOPWORDS = frozenset({
 DEFAULT_LEXICAL_ABSTAIN_THRESHOLD = 0.42
 DEFAULT_RERANK_ABSTAIN_THRESHOLD = 0.45
 
+# Threshold for the shipped post-packing gate (``score_query_confidence``).
+DEFAULT_ABSTAIN_THRESHOLD = 0.45
+
 
 def tokenize_content(text: str) -> list[str]:
     """Extract lowercase alphanumeric content tokens excluding stopwords."""
@@ -145,6 +148,114 @@ def calibrate_reranker_logit(
 
 def _candidate_text(candidate: dict[str, Any]) -> str:
     return str(candidate.get("fact", ""))
+
+
+def _idf_weights(
+    query: str,
+    token_sets: list[set[str]],
+    corpus_idf: dict[str, float],
+    n_docs: int,
+) -> dict[str, float]:
+    """Query tokens that the store or the retrieved items could ever match.
+
+    Tokens that appear nowhere are excluded rather than weighted at maximum IDF:
+    they cannot be matched by any candidate, and counting them would mark every
+    paraphrase as low confidence.
+    """
+    everything = set().union(*token_sets) if token_sets else set()
+    missing = unseen_token_idf(n_docs)
+    weights: dict[str, float] = {}
+    for tok in dict.fromkeys(tokenize_content(query)):
+        if tok in corpus_idf:
+            weights[tok] = corpus_idf[tok]
+        elif tok in everything:
+            weights[tok] = missing
+    return weights
+
+
+def _coverage(tokens: set[str], q_weights: dict[str, float]) -> float:
+    total = sum(q_weights.values())
+    if total <= 0.0:
+        return 0.0
+    return sum(weight for tok, weight in q_weights.items() if tok in tokens) / total
+
+
+def score_query_confidence(
+    query: str,
+    results: list[dict[str, Any]],
+    tenant_facts: list[str] | None = None,
+    threshold: float = DEFAULT_ABSTAIN_THRESHOLD,
+    *,
+    corpus_statistics: tuple[dict[str, float], int] | None = None,
+    has_reranker: bool = False,
+    rerank_shift: float = -1.5,
+    rerank_temperature: float = 2.0,
+    best_weight: float = 0.65,
+    union_weight: float = 0.35,
+    anchor_penalty: float = 0.50,
+) -> dict[str, Any]:
+    """Confidence for an already-packed result set, and whether to abstain.
+
+    Coverage is ``0.65 * best single item + 0.35 * top-3 union``, so a question
+    whose two evidence items landed in different slots is still counted as
+    covered. The query's highest-IDF term is the semantic anchor: when it is
+    absent from the top three, coverage is halved, which is what separates an
+    unanswerable question that shares generic verbs from a real hit.
+
+    This runs after budget packing and after the recency tie-break, so it can
+    only empty the result set; it cannot move a retrieval rank. ``threshold`` is
+    the confidence below which the gate abstains.
+    """
+    threshold = float(threshold)
+    if not results:
+        return {
+            "confidence": 0.0,
+            "abstain_recommended": True,
+            "confidence_threshold": round(threshold, 4),
+        }
+
+    if corpus_statistics is not None:
+        corpus_idf, n_docs = corpus_statistics
+    else:
+        docs = tenant_facts if tenant_facts is not None else [_candidate_text(r) for r in results]
+        corpus_idf = compute_corpus_idf(docs)
+        n_docs = max(1, len(docs))
+
+    item_tokens = [set(tokenize_content(_candidate_text(item))) for item in results]
+    head = item_tokens[:3]
+    q_weights = _idf_weights(query, item_tokens, corpus_idf, n_docs)
+    if not q_weights:
+        # No token of the question exists in the store or in what came back.
+        return {
+            "confidence": 0.0,
+            "abstain_recommended": True,
+            "confidence_threshold": round(threshold, 4),
+        }
+
+    best = max((_coverage(tokens, q_weights) for tokens in item_tokens), default=0.0)
+    union = _coverage(set().union(*head), q_weights) if head else 0.0
+    coverage = best_weight * best + union_weight * union
+
+    anchor = max(q_weights, key=lambda tok: q_weights[tok])
+    if anchor not in set().union(*head):
+        coverage *= anchor_penalty
+
+    confidence = max(0.0, min(1.0, coverage))
+    if has_reranker:
+        logits = [_rerank_logit(item) for item in results]
+        available = [logit for logit in logits if logit is not None]
+        if available:
+            ce_prob = calibrate_reranker_logit(
+                max(available), shift=rerank_shift, temperature=rerank_temperature
+            )
+            confidence = 0.80 * ce_prob + 0.20 * confidence
+
+    confidence = round(max(0.0, min(1.0, confidence)), 6)
+    return {
+        "confidence": round(confidence, 4),
+        "abstain_recommended": bool(confidence < threshold),
+        "confidence_threshold": round(threshold, 4),
+    }
 
 
 def _lexical_score(candidate: dict[str, Any]) -> float:
