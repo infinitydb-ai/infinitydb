@@ -172,3 +172,42 @@ def test_quantized_reranker_reuses_an_existing_int8_file(monkeypatch, tmp_path):
     local_models.local_reranker(quantize=True, cache_dir=str(tmp_path))
 
     assert state["quantized"] == 0
+
+
+def _stub_fastembed_utils(monkeypatch, attributes):
+    """Replace fastembed's cache helper module with one exposing ``attributes``."""
+    utils = types.ModuleType("fastembed.common.utils")
+    for name, value in attributes.items():
+        setattr(utils, name, value)
+    fastembed = types.ModuleType("fastembed")
+    fastembed.common = types.ModuleType("fastembed.common")
+    fastembed.common.utils = utils
+    monkeypatch.setitem(sys.modules, "fastembed", fastembed)
+    monkeypatch.setitem(sys.modules, "fastembed.common", fastembed.common)
+    monkeypatch.setitem(sys.modules, "fastembed.common.utils", utils)
+
+
+def test_cache_root_uses_the_helper_this_fastembed_ships(monkeypatch, tmp_path):
+    """0.9 dropped ``get_cache_dir``; the installed name must be honoured."""
+    _stub_fastembed_utils(
+        monkeypatch, {"define_cache_dir": lambda cache_dir=None: tmp_path}
+    )
+    assert local_models._cache_root(None) == tmp_path
+
+
+def test_cache_root_survives_a_fastembed_without_any_cache_helper(monkeypatch, tmp_path):
+    """A future rename must not break ``--quantize-rerank`` with no flags."""
+    _stub_fastembed_utils(monkeypatch, {})
+    monkeypatch.delenv("INFINITYDB_ONNX_CACHE", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+
+    assert local_models._cache_root(None) == tmp_path / "infinitydb" / "onnx"
+
+
+def test_cache_root_prefers_the_documented_overrides(monkeypatch, tmp_path):
+    _stub_fastembed_utils(monkeypatch, {})
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("INFINITYDB_ONNX_CACHE", str(tmp_path / "pinned"))
+
+    assert local_models._cache_root(None) == tmp_path / "pinned"
+    assert local_models._cache_root(str(tmp_path / "explicit")) == tmp_path / "explicit"
